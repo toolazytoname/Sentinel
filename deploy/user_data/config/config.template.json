@@ -21,13 +21,35 @@
     "cancel_open_orders_on_exit": false,
 
     // ──────────────────── 交易所 ────────────────────
-    // 默认 OKX（代理下可达性较好）；也可改 Binance/Bybit
+    // Binance（Binance 的 ccxt 实现最稳定）
+    // 国内网络必须走代理：httpsProxy 指向 127.0.0.1:7890（docker-compose 用 host 网络模式）
+    // pair_whitelist/blacklist 在 freqtrade 2026.6 中已迁移到 exchange 块内
+    // 换代理端口时同步改这里和 deploy/docker-compose.yml
     "exchange": {
-        "name": "okx",
+        "name": "binance",
         "key": "${EXCHANGE_KEY}",
         "secret": "${EXCHANGE_SECRET}",
-        "ccxt_config": {"enableRateLimit": true, "timeout": 30000},
-        "ccxt_async_config": {"enableRateLimit": true, "timeout": 30000}
+        "pair_whitelist": [
+            "BTC/USDT",
+            "ETH/USDT"
+        ],
+        "pair_blacklist": [
+            "BNB/.*",
+            ".*UP/.*",
+            ".*DOWN/.*"
+        ],
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "timeout": 30000,
+            "httpsProxy": "http://127.0.0.1:7890",
+            "options": {"defaultType": "spot"}
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "timeout": 30000,
+            "httpsProxy": "http://127.0.0.1:7890",
+            "options": {"defaultType": "spot"}
+        }
     },
 
     // ──────────────────── 策略挂载点（Phase 1 才填具体策略名） ────────────────────
@@ -42,6 +64,10 @@
     "stoploss_on_exchange": true,
     "stoploss_on_exchange_interval": 60,
     "stoploss_on_exchange_market_ratio": -0.01,
+
+    // ──────────────────── 定价配置（freqtrade 2026.x 必填） ────────────────────
+    "entry_pricing": {"price_side": "same", "use_order_book": false},
+    "exit_pricing": {"price_side": "same", "use_order_book": false},
 
     // ──────────────────── Protections（引擎级回撤熔断，6 个框架里 freqtrade 独有） ────────────────────
     "protections": [
@@ -72,15 +98,9 @@
         }
     ],
 
-    // ──────────────────── Pair 白名单（Phase 0 用最稳的两个，Phase 1 扩展） ────────────────────
-    "pair_whitelist": [
-        "BTC/USDT",
-        "ETH/USDT"
-    ],
-    "pair_blacklist": [
-        "BNB/.*",   // 平台币排除（防关联风险）
-        ".*UP/.*",  // 杠杆代币排除（不适合规则策略）
-        ".*DOWN/.*"
+    // ──────────────────── Pair 白名单配置（pair_whitelist 在 exchange 块内，见上） ────────────────────
+    "pairlists": [
+        {"method": "StaticPairList"}
     ],
 
     // ──────────────────── Telegram（明天起床后填） ────────────────────

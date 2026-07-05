@@ -13,24 +13,38 @@
     "cancel_open_orders_on_exit": false,
 
     "exchange": {
-        "name": "okx",
+        "name": "binance",
         "key": "",
         "secret": "",
-        "ccxt_config": {"enableRateLimit": true, "timeout": 30000},
-        "ccxt_async_config": {"enableRateLimit": true, "timeout": 30000}
+        "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
+        "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "timeout": 30000,
+            "httpsProxy": "http://127.0.0.1:7890",
+            "options": {"defaultType": "spot"}
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "timeout": 30000,
+            "httpsProxy": "http://127.0.0.1:7890",
+            "options": {"defaultType": "spot"}
+        }
     },
 
-    "strategy": "SampleStrategy",
+    "strategy": "S1TrendFollow",
 
     "stoploss": -0.10,
     "stoploss_on_exchange": true,
     "stoploss_on_exchange_interval": 60,
     "stoploss_on_exchange_market_ratio": -0.01,
 
-    "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
-    "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+    "entry_pricing": {"price_side": "same", "use_order_book": false},
+    "exit_pricing": {"price_side": "same", "use_order_book": false},
 
-    "_protections_removed_phase0": "freqtrade 2026.6 deprecated 'protections' in config; needs migration to strategy-level pairlists/protections. See docs/system/03-tasks.md P1.x to restore. SampleStrategy without protections is acceptable for Phase 0 flow verification.",
+    "pairlists": [
+        {"method": "StaticPairList"}
+    ],
 
     "telegram": {
         "enabled": false,
@@ -49,13 +63,13 @@
         "listen_ip_address": "0.0.0.0",
         "listen_port": 8080,
         "verbosity": "info",
-        "jwt_secret_key": "***REMOVED***",
+        "jwt_secret_key": "${API_JWT_SECRET}",
         "CORS_origins": ["http://localhost:8080"],
         "username": "sentinel",
-        "password": "***REMOVED***"
+        "password": "${API_PASSWORD}"
     },
 
     "db_url": "sqlite:///user_data/tradesv3.sqlite",
-    "verbosity": 1,
+    "verbosity": 3,
     "logfile": "user_data/logs/freqtrade.log"
 }
