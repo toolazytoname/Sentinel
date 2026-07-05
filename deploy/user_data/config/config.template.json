@@ -1,0 +1,124 @@
+// Sentinel — freqtrade 配置模板
+//
+// 使用方法：
+//   1. 复制本文件为 deploy/user_data/config/dry-run.json 和 live-small.json
+//   2. dry-run.json 与 live-small.json 的差异必须仅有 "dry_run" 一行（ADR-005 纪律）
+//   3. 所有交易所 API key 走环境变量注入（见 deploy/.env.example），不写在本文件
+//
+// 强制项（ADR-001 / ADR-003 / ADR-005）已开启，**不要随意关闭**。
+
+{
+    "$schema": "https://www.freqtrade.io/en/stable/schema.json",
+
+    // ──────────────────── 基础 ────────────────────
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": 50,
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "timeframe": "1d",
+    "dry_run": true,                    // ← dry-run/live 切换的唯一开关
+    "cancel_open_orders_on_exit": false,
+
+    // ──────────────────── 交易所 ────────────────────
+    // 默认 OKX（代理下可达性较好）；也可改 Binance/Bybit
+    "exchange": {
+        "name": "okx",
+        "key": "${EXCHANGE_KEY}",
+        "secret": "${EXCHANGE_SECRET}",
+        "ccxt_config": {"enableRateLimit": true, "timeout": 30000},
+        "ccxt_async_config": {"enableRateLimit": true, "timeout": 30000}
+    },
+
+    // ──────────────────── 策略挂载点（Phase 1 才填具体策略名） ────────────────────
+    // Phase 0 用 freqtrade 自带的 SampleStrategy 跑通流程
+    "strategy": "SampleStrategy",
+
+    // ──────────────────── 风控（ADR-001 / ADR-003 强制项） ────────────────────
+    // 静态止损作为最后兜底，交易所侧止损单（下方）才是主要保护
+    "stoploss": -0.10,
+
+    // ⭐ 交易所侧止损单：进程崩溃后仓位仍有保护 —— Sentinel 的关键安全网
+    "stoploss_on_exchange": true,
+    "stoploss_on_exchange_interval": 60,
+    "stoploss_on_exchange_market_ratio": -0.01,
+
+    // ──────────────────── Protections（引擎级回撤熔断，6 个框架里 freqtrade 独有） ────────────────────
+    "protections": [
+        {
+            "method": "MaxDrawdown",
+            "lookback_period": 1440,    // 24 小时
+            "stop_duration": 1440,      // 触发后停 24 小时
+            "trade_limit": 1,
+            "max_allowed_drawdown": 0.10  // 回撤 10% 即熔断
+        },
+        {
+            "method": "StoplossGuard",
+            "lookback_period": 240,     // 4 小时窗口
+            "stop_duration": 720,       // 触发后停 12 小时
+            "trade_limit": 3            // 4h 内 3 次止损即触发
+        },
+        {
+            "method": "CooldownPeriod",
+            "lookback_period": 1,
+            "stop_duration": 480        // 止损后冷却 8 小时
+        },
+        {
+            "method": "LowProfitPairs",
+            "lookback_period": 60,
+            "stop_duration": 60,
+            "trade_limit": 1,
+            "required_profit": 0.02      // 1h 内盈利不足 2% 即暂停该对
+        }
+    ],
+
+    // ──────────────────── Pair 白名单（Phase 0 用最稳的两个，Phase 1 扩展） ────────────────────
+    "pair_whitelist": [
+        "BTC/USDT",
+        "ETH/USDT"
+    ],
+    "pair_blacklist": [
+        "BNB/.*",   // 平台币排除（防关联风险）
+        ".*UP/.*",  // 杠杆代币排除（不适合规则策略）
+        ".*DOWN/.*"
+    ],
+
+    // ──────────────────── Telegram（明天起床后填） ────────────────────
+    "telegram": {
+        "enabled": false,            // 等 .env 里填了 token 改为 true
+        "token": "${FREQTELEGRAM__TELEGRAM_TOKEN}",
+        "chat_id": "${FREQTELEGRAM__CHAT_ID}",
+        "notification_settings": {
+            "status": "on",
+            "warning": "on",
+            "startup": "on",
+            "entry": "on",
+            "entry_fill": "on",
+            "entry_cancel": "on",
+            "exit": "on",
+            "exit_fill": "on",
+            "exit_cancel": "on",
+            "protection_trigger": "on",
+            "protection_trigger_global": "on"
+        }
+    },
+
+    // ──────────────────── API Server（FreqUI 后端） ────────────────────
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "info",
+        "jwt_secret_key": "${API_JWT_SECRET}",
+        "CORS_origins": ["http://localhost:8080"],
+        "username": "sentinel",
+        "password": "${API_PASSWORD}"
+    },
+
+    // ──────────────────── 数据库 ────────────────────
+    "db_url": "sqlite:///user_data/tradesv3.sqlite",
+
+    // ──────────────────── 日志 ────────────────────
+    "verbosity": 1,
+    "logfile": "user_data/logs/freqtrade.log"
+}

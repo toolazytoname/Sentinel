@@ -1,0 +1,61 @@
+{
+    "$schema": "https://www.freqtrade.io/en/stable/schema.json",
+    "_comment": "由 config.template.json 生成。dry-run/live 唯一差异是 dry_run 字段。",
+    "_sentinel_phase": "Phase 0 — 跑通流程，不实盘",
+
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": 50,
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "timeframe": "1d",
+    "dry_run": true,
+    "cancel_open_orders_on_exit": false,
+
+    "exchange": {
+        "name": "okx",
+        "key": "",
+        "secret": "",
+        "ccxt_config": {"enableRateLimit": true, "timeout": 30000},
+        "ccxt_async_config": {"enableRateLimit": true, "timeout": 30000}
+    },
+
+    "strategy": "SampleStrategy",
+
+    "stoploss": -0.10,
+    "stoploss_on_exchange": true,
+    "stoploss_on_exchange_interval": 60,
+    "stoploss_on_exchange_market_ratio": -0.01,
+
+    "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
+    "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+
+    "_protections_removed_phase0": "freqtrade 2026.6 deprecated 'protections' in config; needs migration to strategy-level pairlists/protections. See docs/system/03-tasks.md P1.x to restore. SampleStrategy without protections is acceptable for Phase 0 flow verification.",
+
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": "",
+        "notification_settings": {
+            "status": "on", "warning": "on", "startup": "on",
+            "entry": "on", "entry_fill": "on", "entry_cancel": "on",
+            "exit": "on", "exit_fill": "on", "exit_cancel": "on",
+            "protection_trigger": "on", "protection_trigger_global": "on"
+        }
+    },
+
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "info",
+        "jwt_secret_key": "***REMOVED***",
+        "CORS_origins": ["http://localhost:8080"],
+        "username": "sentinel",
+        "password": "***REMOVED***"
+    },
+
+    "db_url": "sqlite:///user_data/tradesv3.sqlite",
+    "verbosity": 1,
+    "logfile": "user_data/logs/freqtrade.log"
+}

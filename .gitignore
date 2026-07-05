@@ -54,8 +54,14 @@ out/
 data/
 backups/
 
-# ===== freqtrade 用户数据（含配置、策略产生的交易历史）=====
-user_data/
+# ===== freqtrade 用户数据（含配置、策略、交易历史）=====
+# 配置模板和 README 进 git；运行时数据、SQLite、下载的数据、交易日志排除
+user_data/data/
+user_data/logs/
+user_data/tradesv3.sqlite*
+user_data/*.sqlite
+user_data/*.sqlite-journal
+user_data/backtest_results/
 freqtrade_data/
 
 # ===== Docker / 部署 =====
