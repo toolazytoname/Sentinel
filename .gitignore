@@ -1,0 +1,78 @@
+# ===== 操作系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== 环境配置 / 密钥（最高优先级：绝不能让密钥进 git）=====
+.env
+.env.local
+.env.*.local
+*.env
+secrets/
+config.local.*
+api-keys.json
+*.key
+*.pem
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+*.log
+
+# ===== Node / Next.js (Phase 3 dashboard) =====
+node_modules/
+.next/
+out/
+.npm
+.eslintcache
+
+# ===== 数据库 / 持久化数据 =====
+*.sqlite
+*.sqlite3
+*.db
+*.duckdb
+data/
+backups/
+
+# ===== freqtrade 用户数据（含配置、策略产生的交易历史）=====
+user_data/
+freqtrade_data/
+
+# ===== Docker / 部署 =====
+deploy/.env
+deploy/secrets/
+
+# ===== 数据下载 / 行情文件 =====
+*.csv
+*.parquet
+*.feather
+historical_data/
+
+# ===== 文档构建产物 =====
+docs/_build/
+site/
+
+# ===== 临时文件 =====
+*.tmp
+*.bak
+*.orig
