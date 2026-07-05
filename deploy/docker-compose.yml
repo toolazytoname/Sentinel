@@ -1,0 +1,81 @@
+# Sentinel — docker-compose for freqtrade (Phase 0)
+#
+# 启动：
+#   cd deploy && cp .env.example .env && 编辑 .env（明天起床后再做）
+#   docker compose pull
+#   docker compose up -d
+#
+# 访问 FreqUI：http://localhost:8080
+# 默认账号：sentinel / (在 .env 的 API_PASSWORD 中设置)
+#
+# 停止：
+#   docker compose down
+#
+# 日志：
+#   docker compose logs -f freqtrade
+
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    container_name: sentinel-freqtrade
+    restart: unless-stopped
+    # 加载 .env 文件，把变量注入到 freqtrade 容器（freqtrade 通过 FREQTELEGRAM__TELEGRAM_TOKEN 等环境变量读取）
+    env_file:
+      - .env
+    # 把宿主机的代理传入容器，让 freqtrade 内部访问 Binance 等交易所走代理
+    environment:
+      - HTTP_PROXY=http://host.docker.internal:7890
+      - HTTPS_PROXY=http://host.docker.internal:7890
+      - ALL_PROXY=socks5://host.docker.internal:7890
+      - http_proxy=http://host.docker.internal:7890
+      - https_proxy=http://host.docker.internal:7890
+      - all_proxy=socks5://host.docker.internal:7890
+    volumes:
+      # 挂载 user_data 持久化配置、策略、SQLite、日志
+      - ./user_data:/freqtrade/user_data
+    ports:
+      - "8080:8080"   # FreqUI/API Server
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:///user_data/tradesv3.sqlite
+      --config /freqtrade/user_data/config/dry-run.json
+      --strategy SampleStrategy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ============================================================
+# 未来 Phase 2 加入的服务（先注释掉，避免今晚启动时拉镜像失败）：
+#
+#   ai-service:
+#     build: ../ai-service
+#     container_name: sentinel-ai
+#     restart: unless-stopped
+#     env_file: [.env]
+#     ports: ["8000:8000"]
+#     depends_on: [postgres]
+#
+#   postgres:
+#     image: postgres:16-alpine
+#     container_name: sentinel-postgres
+#     restart: unless-stopped
+#     environment:
+#       POSTGRES_DB: sentinel
+#       POSTGRES_USER: sentinel
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#     volumes: [postgres_data:/var/lib/postgresql/data]
+#
+#   dashboard:
+#     build: ../dashboard
+#     container_name: sentinel-dashboard
+#     restart: unless-stopped
+#     ports: ["3000:3000"]
+#     depends_on: [freqtrade, ai-service]
+#
+# volumes:
+#   postgres_data:
+# ============================================================
