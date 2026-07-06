@@ -8,13 +8,15 @@ Routes mirror docs/system/02-design.md §2.2 modules:
   POST /strategy/check    → check upgrade criteria
   GET  /strategy/{name}/stage → current stage snapshot
   GET  /veto               → compact veto endpoint for the strategy side
-  GET  /healthz           → liveness probe
+  POST /telegram/webhook   → inbound Telegram commands (/status, /help)
+  GET  /healthz            → liveness probe
 
 All endpoints accept/return JSON with Pydantic validation. LLM-dependent
 endpoints may return 503 on LLMUnavailable (caller can fall back).
 
-Background scheduler (see app/scheduler.py) is wired via the lifespan
-context manager so it starts on app startup and stops cleanly on shutdown.
+Background scheduler (see app/scheduler.py) and Telegram notifier
+(see app/notifier.py) are wired via the lifespan context manager so
+they start on app startup and stop cleanly on shutdown.
 """
 from __future__ import annotations
 
@@ -32,6 +34,7 @@ from app.db import get_session
 from app.deps import (
     get_db,
     get_llm_client,
+    get_notifier,
     get_reflection_extractor,
     get_research_extractor,
     get_veto_extractor,
@@ -52,6 +55,7 @@ from app.modules.stages import (
     register_strategy,
 )
 from app.modules.veto import MarketContext, TradeSignal, audit
+from app.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +64,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the background scheduler on startup, stop on shutdown.
+    """Start the background scheduler + Telegram notifier on startup, stop on shutdown.
 
-    The scheduler is opt-out via SCHEDULER_ENABLED=false. In tests we leave
-    it disabled (set via env in conftest). Real production runs leave it on.
+    The scheduler is opt-out via SCHEDULER_ENABLED=false. The notifier
+    always exists — if TELEGRAM_BOT_TOKEN/CHAT_ID are missing it falls
+    back to log-only mode (every send becomes an INFO log line).
     """
     from app.llm import ResearchExtractor, StructuredExtractor
     from app.modules.research import CoinGeckoEventsSource, ResearchIngester
+    from app.notifier import NotifierConfig, TelegramNotifier
     from app.scheduler import SchedulerConfig, SentinelScheduler
 
     config = SchedulerConfig.from_env()
+    notifier = TelegramNotifier(NotifierConfig.from_env())
+    app.state.notifier = notifier
+
     ingester = ResearchIngester(
         source=CoinGeckoEventsSource(),
         extractor=ResearchExtractor(StructuredExtractor(get_llm_client())),
@@ -79,6 +88,7 @@ async def lifespan(app: FastAPI):
         config,
         ingester=ingester,
         session_factory=get_session,
+        notifier=notifier,
     )
     scheduler.start()
     app.state.scheduler = scheduler
@@ -86,6 +96,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         scheduler.stop()
+        notifier.close()
 
 
 app = FastAPI(
@@ -329,3 +340,64 @@ def strategy_get(name: str, db: Session = Depends(get_db)):
         rationale=report.rationale,
         next_stage=report.next_stage,
     )
+
+
+# --- Telegram webhook ---
+
+@app.post("/telegram/webhook")
+def telegram_webhook(
+    update: dict,
+    db: Session = Depends(get_db),
+    notifier: TelegramNotifier = Depends(get_notifier),
+) -> dict:
+    """Inbound Telegram Update → route command → reply.
+
+    Always returns 200 (Telegram retries on non-2xx). Non-command
+    messages and updates without text are ignored.
+
+    Supported commands:
+      /status           → list all strategies + current stage
+      /status <name>    → detail one strategy (stage + last reflections)
+      /help, /start     → command list
+    """
+    msg = update.get("message") or {}
+    text = (msg.get("text") or "").strip()
+    chat_id_raw = msg.get("chat", {}).get("id")
+    chat_id = str(chat_id_raw) if chat_id_raw is not None else None
+
+    if not text or chat_id is None or not text.startswith("/"):
+        return {"ok": True}
+
+    cmd, _, args = text.partition(" ")
+    cmd = cmd.split("@")[0]  # strip @botname suffix if present
+
+    response_text: str | None = None
+
+    if cmd in ("/help", "/start"):
+        response_text = TelegramNotifier.format_help()
+    elif cmd == "/status":
+        target = args.strip() or None
+        if target is None:
+            from app.db.repository import all_strategy_stages
+            stages = all_strategy_stages(db)
+            response_text = TelegramNotifier.format_status_overview(stages)
+        else:
+            from app.db.repository import (
+                get_strategy_stage,
+                reflections_for_strategy,
+            )
+            row = get_strategy_stage(db, target)
+            if row is None:
+                response_text = f"❌ Strategy `{target}` is not registered."
+            else:
+                recent = reflections_for_strategy(db, target, limit=3)
+                response_text = TelegramNotifier.format_status_detail(
+                    stage_row=row, recent_reflections=recent,
+                )
+    else:
+        response_text = f"Unknown command `{cmd}`. Try /help."
+
+    if response_text is not None:
+        notifier.send_message(response_text, chat_id=chat_id)
+
+    return {"ok": True}

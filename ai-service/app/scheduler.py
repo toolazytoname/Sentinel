@@ -52,18 +52,43 @@ def safe_run(name: str, fn: Callable[[], None]) -> None:
         logger.exception("scheduled job %s failed", name)
 
 
-def run_daily_research(ingester) -> None:
-    """One ingestion pass. Logs but never raises."""
+def run_daily_research(ingester, notifier=None) -> None:
+    """One ingestion pass, then notify Telegram for any severity>=4 notes.
+
+    Logs but never raises. Notifier is optional — if absent or in log-only
+    mode, alerts go to the application log instead.
+    """
+    from datetime import timedelta, timezone
+
     count = ingester.run_once()
     logger.info("daily research job persisted %d notes", count)
 
+    if notifier is None:
+        return
 
-def run_daily_stage_check(session_factory) -> None:
-    """Check every registered strategy and log the recommendation.
+    # Query notes created in the last hour — these are the ones we just
+    # ingested (daily cron runs hours apart so 1h captures the new batch
+    # without flooding with yesterday's notes).
+    from app.db.models import ResearchNoteRow
+    from sqlalchemy import select
 
-    For now: log-only (no Telegram yet — that's P2.8). Telegram wiring
-    will subscribe to a future hook this function calls.
-    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    with ingester._session_factory() as session:  # type: ignore[attr-defined]
+        stmt = (
+            select(ResearchNoteRow)
+            .where(ResearchNoteRow.severity >= 4)
+            .where(ResearchNoteRow.created_at >= cutoff)
+            .order_by(ResearchNoteRow.created_at.desc())
+        )
+        notes = session.execute(stmt).scalars().all()
+
+    sent = notifier.send_research_alerts(notes)
+    if sent:
+        logger.info("daily research job sent %d high-severity alerts", sent)
+
+
+def run_daily_stage_check(session_factory, notifier=None) -> None:
+    """Check every registered strategy and log + notify on promote/demote."""
     # Local imports to keep the module importable without DB
     from app.db import all_strategy_stages
     from app.modules.stages import check_stage_upgrade
@@ -74,23 +99,30 @@ def run_daily_stage_check(session_factory) -> None:
             report = check_stage_upgrade(session, row.strategy)
             if report is None:
                 continue
-            level = "PROMOTE" if report.recommendation == "promote" else (
-                "DEMOTE" if report.recommendation == "demote" else "HOLD"
-            )
+            if report.recommendation == "promote":
+                level = "PROMOTE"
+            elif report.recommendation == "demote":
+                level = "DEMOTE"
+            else:
+                level = "HOLD"
             logger.info(
                 "stage-check %s: %s (day %d, dd=%.1f%%) — %s",
                 report.strategy, report.current_stage, report.days_in_stage,
                 report.observed_drawdown_pct, level,
             )
+            # Only send actionable recommendations to Telegram
+            if notifier is not None and report.recommendation in ("promote", "demote"):
+                notifier.send_stage_alert(
+                    strategy=report.strategy,
+                    current_stage=report.current_stage,
+                    recommendation=report.recommendation,
+                    rationale=report.rationale,
+                    next_stage=report.next_stage,
+                )
 
 
-def run_weekly_rollup(session_factory) -> None:
-    """Sunday roll-up of trade reflections.
-
-    Placeholder: counts this week's reflections per strategy and logs.
-    Will grow into a proper weekly report with Telegram delivery once P2.5
-    trade-close webhook is wired in.
-    """
+def run_weekly_rollup(session_factory, notifier=None) -> None:
+    """Sunday roll-up: count reflections per strategy, send Telegram summary."""
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import desc, select
 
@@ -112,6 +144,9 @@ def run_weekly_rollup(session_factory) -> None:
             logger.info("weekly rollup %s: %d reflections this week", strategy, count)
     else:
         logger.info("weekly rollup: no reflections this week")
+
+    if notifier is not None:
+        notifier.send_weekly_summary(by_strategy)
 
 
 # --- Scheduler wrapper ---
@@ -150,10 +185,12 @@ class SentinelScheduler:
         *,
         ingester,
         session_factory,
+        notifier=None,
     ):
         self._config = config
         self._ingester = ingester
         self._session_factory = session_factory
+        self._notifier = notifier
         self._scheduler: BackgroundScheduler | None = None
 
     def start(self) -> None:
@@ -167,9 +204,12 @@ class SentinelScheduler:
 
         self._scheduler = BackgroundScheduler(daemon=True, timezone="UTC")
 
-        # Daily research — coin source → LLM → research_notes
+        # Daily research — coin source → LLM → research_notes → Telegram alerts
         self._scheduler.add_job(
-            lambda: safe_run("daily_research", lambda: run_daily_research(self._ingester)),
+            lambda: safe_run(
+                "daily_research",
+                lambda: run_daily_research(self._ingester, self._notifier),
+            ),
             CronTrigger.from_crontab(self._config.research_cron, timezone="UTC"),
             id="daily_research",
             replace_existing=True,
@@ -179,7 +219,10 @@ class SentinelScheduler:
 
         # Daily stage check
         self._scheduler.add_job(
-            lambda: safe_run("daily_stage_check", lambda: run_daily_stage_check(self._session_factory)),
+            lambda: safe_run(
+                "daily_stage_check",
+                lambda: run_daily_stage_check(self._session_factory, self._notifier),
+            ),
             CronTrigger.from_crontab(self._config.stage_cron, timezone="UTC"),
             id="daily_stage_check",
             replace_existing=True,
@@ -189,7 +232,10 @@ class SentinelScheduler:
 
         # Weekly roll-up
         self._scheduler.add_job(
-            lambda: safe_run("weekly_rollup", lambda: run_weekly_rollup(self._session_factory)),
+            lambda: safe_run(
+                "weekly_rollup",
+                lambda: run_weekly_rollup(self._session_factory, self._notifier),
+            ),
             CronTrigger.from_crontab(self._config.weekly_cron, timezone="UTC"),
             id="weekly_rollup",
             replace_existing=True,

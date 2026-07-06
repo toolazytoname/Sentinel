@@ -20,6 +20,7 @@ from app.llm import (
     StructuredExtractor,
     VetoExtractor,
 )
+from app.notifier import NotifierConfig, TelegramNotifier
 
 
 @lru_cache(maxsize=1)
@@ -81,7 +82,30 @@ def get_reflection_extractor() -> ReflectionExtractor:
     return ReflectionExtractor(get_structured_extractor())
 
 
+@lru_cache(maxsize=1)
+def _notifier_config() -> NotifierConfig:
+    return NotifierConfig.from_env()
+
+
+@lru_cache(maxsize=1)
+def _notifier() -> TelegramNotifier:
+    return TelegramNotifier(_notifier_config())
+
+
+def get_notifier() -> TelegramNotifier:
+    """FastAPI dependency: returns the app-scoped TelegramNotifier.
+
+    Lifespan overrides this cache so we get the same instance the
+    scheduler uses (so scheduler alerts and webhook replies share state
+    like the http connection pool). For tests, build one manually and
+    inject via `app.dependency_overrides[get_notifier]`.
+    """
+    return _notifier()
+
+
 def reset_caches_for_testing() -> None:
     """Clear lru_cache so test fixtures can swap env vars between tests."""
     _settings.cache_clear()
     _llm_client.cache_clear()
+    _notifier_config.cache_clear()
+    _notifier.cache_clear()
