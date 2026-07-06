@@ -54,7 +54,7 @@ from app.modules.stages import (
     check_stage_upgrade,
     register_strategy,
 )
-from app.modules.veto import MarketContext, TradeSignal, audit
+from app.modules.veto import MarketContext, TradeSignal, audit, check_rules
 from app.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,6 @@ def strategy_veto(
     strategy: str,
     pair: str,
     db: Session = Depends(get_db),
-    veto_extractor: VetoExtractor = Depends(get_veto_extractor),
 ) -> schemas.StrategyVetoResponse:
     """Compact veto endpoint for live strategy use.
 
@@ -166,9 +165,15 @@ def strategy_veto(
       GET /veto?strategy=S1TrendFollow&pair=BTC/USDT
         → {"decision": "PASS" | "VETO", "reason": "<short string>"}
 
-    The strategy side treats the LLM/AI service as an additional safety net
-    and defaults to PASS on any error or timeout — never blocks trading due
-    to AI service failure (ADR-002 fail-open).
+    Runs ONLY the deterministic rule layer (fast, <200ms) — it does NOT call
+    the LLM. The strategy side calls this with a tight (~3s) timeout and
+    fails-open on any error/timeout, so a synchronous deep-tier LLM call here
+    would always time out and be dead weight. The full rule+LLM audit lives
+    on POST /audit/veto (internal / future async use).
+
+    The strategy side treats the AI service as an additional safety net and
+    defaults to PASS on any error or timeout — never blocks trading due to
+    AI service failure (ADR-002 fail-open).
     """
     # Conservative defaults for signal-time veto calls. The strategy knows
     # nothing about the rest of the book; the AI service derives what it can
@@ -187,18 +192,19 @@ def strategy_veto(
         side="long",
         stake_pct=0.05,
     )
-    result = audit(signal, context, veto_extractor)
+    vetoed, reason = check_rules(signal, context)
+    source = "rule" if vetoed else "rules_passed"
     insert_veto_record(
         db,
         strategy=strategy,
         pair=pair,
-        veto=result.veto,
-        reason=result.reason,
-        source=result.source,
+        veto=vetoed,
+        reason=reason,
+        source=source,
     )
     return schemas.StrategyVetoResponse(
-        decision="VETO" if result.veto else "PASS",
-        reason=result.reason,
+        decision="VETO" if vetoed else "PASS",
+        reason=reason,
     )
 
 

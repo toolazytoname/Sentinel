@@ -126,6 +126,7 @@
 ## RB — 架构缺陷（设计意图 vs 实现不符，会让「安全网」形同虚设）
 
 - [ ] **RB.1** 🧠 否决链路的 LLM 层在实盘里**永远不会生效**（超时不匹配 + 同步阻塞）
+  🔶 **部分完成（2026-07-07，最小安全版）**：`GET /veto` 已改为**只跑规则层、不调 LLM**（快、诚实，strategy 侧 3s 超时不再无意义地空转），`insert_veto_record` 保留，返回契约 `{decision,reason}` 不变；`POST /audit/veto` 与 `audit()/llm_veto()` 全部保留不动，供异步复用。commit 见下。**剩余（仍需强模型 + 你定方案）**：LLM 反方陈述改为**后台异步预计算写 `veto_records`**，`GET /veto` 读最近一条有效记录（如 15min 内）来决定 PASS/VETO——这样 LLM 否决才真正生效。此剩余项建议与 RB.2（启用规则2/3）合并做。
   - **涉及文件**: `strategies/veto_gate.py`、`ai-service/app/main.py` 的 `GET /veto`、`ai-service/app/llm/openai_compat.py`
   - **问题（读懂再动手）**:
     - 策略侧 `strategies/veto_gate.py` 第 17 行 `DEFAULT_TIMEOUT_S = 3`：`confirm_trade_entry` 调 `GET /veto` 只等 **3 秒**，超时就 fail-open 放行（这是对的，ADR-002）。

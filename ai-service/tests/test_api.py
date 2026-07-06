@@ -199,7 +199,12 @@ def test_veto_fail_open_when_llm_down():
 # --- Strategy-facing GET /veto ---
 
 def test_get_veto_pass_when_no_events():
-    """Strategy-side endpoint: returns {decision: PASS} when rules + LLM pass."""
+    """Strategy-side endpoint: returns {decision: PASS} via the rule layer only.
+
+    RB.1: GET /veto runs ONLY the deterministic rules — it must NOT call the
+    LLM (the strategy calls this on a tight timeout; a synchronous deep-tier
+    LLM call would always time out). Prove the LLM extractor is never invoked.
+    """
     router = FakeLLMRouter(VetoDecision(veto=False, reason="looks fine", confidence=0.5))
     with _build_app_with_fake_llm(router):
         client = TestClient(app)
@@ -208,6 +213,8 @@ def test_get_veto_pass_when_no_events():
         body = resp.json()
         assert body["decision"] == "PASS"
         assert isinstance(body["reason"], str)
+        # RB.1 red-line: the hot-path endpoint must never hit the LLM.
+        assert len(router.calls) == 0
 
 
 def test_get_veto_blocks_on_recent_high_severity_event():
@@ -259,8 +266,12 @@ def test_get_veto_does_not_block_unrelated_asset():
         assert body["decision"] == "PASS"
 
 
-def test_get_veto_fail_open_on_llm_outage():
-    """Strategy-side: LLM down → PASS (never block due to AI outage)."""
+def test_get_veto_ignores_llm_outage_and_uses_rules_only():
+    """RB.1: LLM is out of the hot path entirely.
+
+    Even if the LLM would be unavailable, GET /veto never calls it — it runs
+    rules only, returns PASS via the rule layer, and never touches the LLM.
+    """
     router = FakeLLMRouter(
         VetoDecision(veto=False, reason="no risk", confidence=0.5),
         raise_unavailable=True,
@@ -271,11 +282,18 @@ def test_get_veto_fail_open_on_llm_outage():
         assert resp.status_code == 200
         body = resp.json()
         assert body["decision"] == "PASS"
-        assert "llm_unavailable" in body["reason"]
+        assert body["reason"] == "rules_passed"
+        # LLM must never be reached, so its outage is irrelevant here.
+        assert len(router.calls) == 0
 
 
-def test_get_veto_blocks_when_llm_vetoes():
-    """Strategy-side: LLM vetoes → decision=VETO with LLM's reason."""
+def test_get_veto_ignores_llm_veto_on_hot_path():
+    """RB.1 contract change: an LLM veto must NOT affect GET /veto.
+
+    The LLM would veto, but GET /veto is rules-only now, so rules-pass →
+    decision=PASS and the LLM is never called. (LLM-veto capability lives on
+    POST /audit/veto, which is unchanged.)
+    """
     router = FakeLLMRouter(
         VetoDecision(veto=True, reason="concentration risk too high", confidence=0.8)
     )
@@ -284,8 +302,9 @@ def test_get_veto_blocks_when_llm_vetoes():
         resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["decision"] == "VETO"
-        assert "concentration" in body["reason"]
+        assert body["decision"] == "PASS"
+        assert body["reason"] == "rules_passed"
+        assert len(router.calls) == 0
 
 
 def test_research_note_submit_and_persist():
