@@ -291,7 +291,8 @@
   - **验证/加测**: `ai-service/tests/test_telegram_webhook.py` 加两个用例：带正确 secret → 正常回复；带错误/缺失 secret 且环境配了 secret → 不调用 `notifier.send_message`。`python -m pytest ai-service/tests/test_telegram_webhook.py -q` 全绿。
   - **DoD**: 配了 secret 时伪造 update 被静默丢弃且有测试覆盖；全量测试绿。
 
-- [ ] **RS.2** 🟡 缺失 LLM 密钥时静默 fallback 假 key（掩盖配置错误 → 全线 fail-open）
+- [x] **RS.2** 🟡 缺失 LLM 密钥时静默 fallback 假 key（掩盖配置错误 → 全线 fail-open）
+  ✅ 完成于 2026-07-07，备注：新增 `SENTINEL_ENV`（dev默认/prod）+ `validate_required_secrets()`，在 lifespan 启动顶部调用；prod 且无 AGNES/OPENAI key → 启动即抛 RuntimeError 拒绝启动，dev 保留假 key 兜底。新增 `test_startup_validation.py`（5 用例，autouse fixture + monkeypatch 隔离 env/缓存）。全量 218 passed。
   - **文件**: `ai-service/app/deps.py` 第 34 行 `os.environ.get("AGNES_API_KEY") or os.environ.get("OPENAI_API_KEY", "sk-fake-for-dev")`
   - **问题**: 生产若忘配 key，会静默用 `sk-fake-for-dev` → 所有 LLM 调用 401 → 否决/研究/复盘全部 fail-open 或失败，**但服务照常起、healthz 照样绿**，故障隐形。违反 security.md「启动期校验必需密钥」。
   - **修复**:

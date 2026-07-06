@@ -77,6 +77,12 @@ async def lifespan(app: FastAPI):
     from app.notifier import NotifierConfig, TelegramNotifier
     from app.scheduler import SchedulerConfig, SentinelScheduler
 
+    from app.deps import validate_required_secrets
+
+    # Fail fast: refuse to start a misconfigured prod deploy (no real LLM key)
+    # rather than running blind on the dev fake-key fallback.
+    validate_required_secrets()
+
     config = SchedulerConfig.from_env()
     notifier = TelegramNotifier(NotifierConfig.from_env())
     app.state.notifier = notifier

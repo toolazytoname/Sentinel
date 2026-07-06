@@ -37,7 +37,29 @@ def _settings() -> dict:
         "deep_model": os.environ.get("LLM_DEEP_MODEL", "agnes-2.0-flash"),
         "https_proxy": os.environ.get("HTTPS_PROXY"),
         "db_url": os.environ.get("DATABASE_URL", "sqlite:///./sentinel.db"),
+        "env": os.environ.get("SENTINEL_ENV", "dev"),
     }
+
+
+def validate_required_secrets() -> None:
+    """Fail fast in prod if no real LLM key is configured. Called at app startup.
+
+    In dev (SENTINEL_ENV unset or 'dev') the `sk-fake-for-dev` fallback in
+    `_settings()` is allowed so the service runs without a key. In prod,
+    that fallback would make every LLM call 401 while /healthz stays green —
+    an invisible failure. Refuse to start instead (security.md: validate
+    required secrets at startup).
+    """
+    s = _settings()
+    has_real_key = bool(
+        os.environ.get("AGNES_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    )
+    if s["env"] == "prod" and not has_real_key:
+        raise RuntimeError(
+            "SENTINEL_ENV=prod but no LLM API key set. "
+            "Set AGNES_API_KEY or OPENAI_API_KEY. "
+            "Refusing to start with a fake key."
+        )
 
 
 def get_db() -> Iterator[Session]:
