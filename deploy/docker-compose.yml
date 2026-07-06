@@ -47,15 +47,43 @@ services:
       start_period: 60s
 
 # ============================================================
-# 未来 Phase 2 加入的服务（先注释掉，避免今晚启动时拉镜像失败）：
-#
-#   ai-service:
-#     build: ../ai-service
-#     container_name: sentinel-ai
-#     restart: unless-stopped
-#     env_file: [.env]
-#     ports: ["8000:8000"]
-#     depends_on: [postgres]
+# AI service (P2 — Phase 2.1 wired up)
+# Same host network mode as freqtrade so it can listen on 127.0.0.1:8000
+# and freqtrade's webhook config can POST to http://127.0.0.1:8000/trade-close.
+# SQLite lives on a named volume so reflections survive container restarts.
+# ============================================================
+  ai-service:
+    build:
+      context: ../ai-service
+      dockerfile: Dockerfile
+    container_name: sentinel-ai
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 走本地代理访问 LLM（国内环境必填；agnes-ai / openai 都过代理）
+      HTTPS_PROXY: "http://127.0.0.1:7890"
+      https_proxy: "http://127.0.0.1:7890"
+      # SQLite 路径必须在容器内可写；默认就是 /app/data/sentinel.db
+      DATABASE_URL: "sqlite:////app/data/sentinel.db"
+      # 想停掉后台 scheduler/weekly rollup 时设 false
+      SCHEDULER_ENABLED: "true"
+      AI_SERVICE_HOST: "127.0.0.1"
+      AI_SERVICE_PORT: "8000"
+    network_mode: host
+    volumes:
+      - ai_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  ai_data:
+# ============================================================
+# Future services (postgres, dashboard) — keep commented for now.
 #
 #   postgres:
 #     image: postgres:16-alpine
