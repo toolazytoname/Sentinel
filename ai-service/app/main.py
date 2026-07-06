@@ -7,14 +7,19 @@ Routes mirror docs/system/02-design.md §2.2 modules:
   POST /strategy/register → register strategy at stage
   POST /strategy/check    → check upgrade criteria
   GET  /strategy/{name}/stage → current stage snapshot
+  GET  /veto               → compact veto endpoint for the strategy side
   GET  /healthz           → liveness probe
 
 All endpoints accept/return JSON with Pydantic validation. LLM-dependent
 endpoints may return 503 on LLMUnavailable (caller can fall back).
+
+Background scheduler (see app/scheduler.py) is wired via the lifespan
+context manager so it starts on app startup and stops cleanly on shutdown.
 """
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
@@ -23,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app import api_schemas as schemas
 from app import __version__
+from app.db import get_session
 from app.deps import (
     get_db,
     get_llm_client,
@@ -49,10 +55,44 @@ from app.modules.veto import MarketContext, TradeSignal, audit
 
 logger = logging.getLogger(__name__)
 
+
+# --- Lifespan: scheduler lifecycle ---
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the background scheduler on startup, stop on shutdown.
+
+    The scheduler is opt-out via SCHEDULER_ENABLED=false. In tests we leave
+    it disabled (set via env in conftest). Real production runs leave it on.
+    """
+    from app.llm import ResearchExtractor, StructuredExtractor
+    from app.modules.research import CoinGeckoEventsSource, ResearchIngester
+    from app.scheduler import SchedulerConfig, SentinelScheduler
+
+    config = SchedulerConfig.from_env()
+    ingester = ResearchIngester(
+        source=CoinGeckoEventsSource(),
+        extractor=ResearchExtractor(StructuredExtractor(get_llm_client())),
+        session_factory=get_session,
+    )
+    scheduler = SentinelScheduler(
+        config,
+        ingester=ingester,
+        session_factory=get_session,
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+    try:
+        yield
+    finally:
+        scheduler.stop()
+
+
 app = FastAPI(
     title="Sentinel AI Service",
     version=__version__,
     description="Risk audit, research, reflection, and stage tracking for Sentinel trading system.",
+    lifespan=lifespan,
 )
 
 
