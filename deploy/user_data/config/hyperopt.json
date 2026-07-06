@@ -1,0 +1,51 @@
+{
+    "_comment": "Hyperopt / backtest 专用配置 — 不带 dry_run/api_server/telegram，避免 trade 模式噪音。",
+    "_sentinel_phase": "P1.4 hyperopt",
+
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": 50,
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "timeframe": "1d",
+
+    "dry_run": false,
+    "dry_run_wallet": 1000,
+
+    "exchange": {
+        "name": "binance",
+        "key": "",
+        "secret": "",
+        "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
+        "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+        "markets_refresh_interval": 1000000,
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "aiohttp_trust_env": true
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "httpsProxy": "http://127.0.0.1:7890",
+            "aiohttp_trust_env": true
+        }
+    },
+
+    "trading_mode": "spot",
+    "margin_mode": "",
+
+    "pairlists": [
+        {"method": "StaticPairList"}
+    ],
+
+    "stoploss": -0.10,
+    "stoploss_on_exchange": false,
+
+    "entry_pricing": {"price_side": "same", "use_order_book": false},
+    "exit_pricing": {"price_side": "same", "use_order_book": false},
+
+    "db_url": "sqlite:///:memory:",
+    "verbosity": 1,
+    "dataformat_ohlcv": "json",
+
+    "strategy": "S1TrendFollow"
+}
