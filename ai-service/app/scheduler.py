@@ -58,7 +58,7 @@ def run_daily_research(ingester, notifier=None) -> None:
     Logs but never raises. Notifier is optional — if absent or in log-only
     mode, alerts go to the application log instead.
     """
-    from datetime import timedelta, timezone
+    from datetime import datetime, timedelta, timezone
 
     count = ingester.run_once()
     logger.info("daily research job persisted %d notes", count)

@@ -68,6 +68,41 @@ def test_run_daily_research_calls_ingester():
     ingester.run_once.assert_called_once()
 
 
+def test_run_daily_research_alerts_high_severity_notes():
+    from app.db.models import ResearchNoteRow
+
+    sf = _make_session_factory()
+    recent = datetime.now(timezone.utc) - timedelta(minutes=5)
+    with sf() as s:
+        s.add(
+            ResearchNoteRow(
+                asset="BTC",
+                event_type="regulation",
+                severity=5,
+                summary="high severity event",
+                source_url="https://example.com/a",
+                published_at="2026-07-06T00:00:00Z",
+                created_at=recent,
+            )
+        )
+        s.commit()
+
+    ingester = MagicMock(spec=ResearchIngester)
+    ingester.run_once.return_value = 1
+    ingester._session_factory = sf
+
+    notifier = MagicMock()
+    notifier.send_research_alerts.return_value = 1
+
+    run_daily_research(ingester, notifier)
+
+    notifier.send_research_alerts.assert_called_once()
+    sent_notes = notifier.send_research_alerts.call_args.args[0]
+    assert len(sent_notes) == 1
+    assert sent_notes[0].severity == 5
+    assert sent_notes[0].summary == "high severity event"
+
+
 def test_run_daily_stage_check_logs_each_strategy(caplog):
     sf = _make_session_factory()
     with sf() as s:

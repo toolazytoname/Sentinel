@@ -94,7 +94,8 @@
 
 ## RA — 正确性 Bug（会导致线上静默失效，最高优先级）
 
-- [ ] **RA.1** 修 `run_daily_research` 的 `datetime` NameError（每日高危事件告警从不发出）
+- [x] **RA.1** 修 `run_daily_research` 的 `datetime` NameError（每日高危事件告警从不发出）
+  ✅ 完成于 2026-07-07，备注：一行 import 修复 + 新增告警路径测试，全量 200 passed（校验 subagent 独立复核通过）
   - **文件**: `ai-service/app/scheduler.py`
   - **定位**: 搜索字符串 `from datetime import timedelta, timezone`（约第 61 行，在 `run_daily_research` 函数体内）
   - **问题**: 该行只 import 了 `timedelta, timezone`，但下面第 75 行用了 `datetime.now(timezone.utc)`。`datetime` 这个名字在函数作用域和模块顶部都没 import → 运行时抛 `NameError`。因为整个 job 被 `safe_run()` 包着，异常被吞进日志，**结果是：每日研究 job 里「severity≥4 推 Telegram」这条告警路径永远崩溃，用户永远收不到高危告警，且表面上一切正常**。
