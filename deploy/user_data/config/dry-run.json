@@ -23,14 +23,20 @@
             "timeout": 30000,
             "httpsProxy": "http://127.0.0.1:7890",
             "aiohttp_trust_env": false,
-            "options": {"defaultType": "spot"}
+            "options": {
+                "defaultType": "spot",
+                "fetchMarkets": ["spot"]
+            }
         },
         "ccxt_async_config": {
             "enableRateLimit": true,
             "timeout": 30000,
             "httpsProxy": "http://127.0.0.1:7890",
             "aiohttp_trust_env": false,
-            "options": {"defaultType": "spot"}
+            "options": {
+                "defaultType": "spot",
+                "fetchMarkets": ["spot"]
+            }
         }
     },
 
