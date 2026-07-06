@@ -150,6 +150,7 @@
   - **DoD**: 规则 2、规则 3 要么真实生效、要么在代码注释和本文件里明确标注「暂缺 + 原因」，不留「写死成 0 假装启用」的状态；全测试绿。
 
 - [ ] **RB.3** DB session 所有权混乱：借来的请求 session 被中途关闭
+  ⚠️ BLOCKED（2026-07-07，标 🧠 待强模型）：机械替换 `lambda: db`→`get_session` 会让 `_persist` 用**模块级 engine**，与测试套件经 `get_db` 依赖覆盖注入的 engine 不是同一个 → 写入库与读取库分离，`test_trade_close_webhook.py` 4 个测试变红（`reflection_id=None`、`recorded` 变 `skipped`）。已回退，无悬空。**正确修法**：统一 writer 的 session engine 与测试覆盖 engine（如让 `_persist` 复用请求 session 但不用 `with` 关闭它，或测试同时覆盖 `get_session`）——需重构 session 接线，非机械改动。RA.2 改为独立做（不依赖本任务，见 RA.2）。
   - **文件**: `ai-service/app/main.py`（2 处）+ `ai-service/app/modules/reflection.py`
   - **定位**: main.py 搜索 `ReflectionWriter(extractor, lambda: db)`（约第 266 行和第 421 行，两处都要改）
   - **问题**: 这两处把请求级 session `db` 用 `lambda: db` 传进 `ReflectionWriter`。而 `reflection.py` 的 `_persist` 里写的是 `with self._session_factory() as session:` —— 对 SQLAlchemy 的 `Session` 用 `with` 会在退出时 **`close()` 掉这个 session**。于是 `writer.record()` 一跑完，请求的 `db` 就被关了；`/trade-close` 第 431 行还拿这个已关闭的 `db` 去 `get_reflection_by_trade_id` 再查一次（靠 SQLAlchemy「关闭后自动开新事务」的隐式行为侥幸能跑，但语义是错的、脆弱）。同时 `get_db()` 的 `finally` 又会 close 一次（双重关闭）。
@@ -224,8 +225,9 @@
 
 ## RD — UI / UE：给用户一个「不用敲终端」的操作面（用户明确需求）
 
-> 用户诉求：别全程 terminal。现状控制面只有 FreqUI（交易）+ Telegram（通知/查询）+ 一堆要 curl 的 AI 服务接口（登记策略、查阶段、批准升级全靠命令行）。
-> 原则：**KISS + YAGNI**。Phase 3 的 Next.js 独立看板成本高、且还早。**先用最低成本补一个「运维小面板」**，直接由现有 ai-service 提供，复用已有 JSON 接口，别新起一个前端工程。
+> ⏭️ **SKIPPED（2026-07-07，用户决定）**：UI 界面改由用户用 **open design** 自行设计，本组 RD.1/RD.2/RD.3 暂不由自治流实现。
+> 若 open design 产出的前端需要后端支撑（如只读聚合接口、`POST /strategy/{name}/approve` 升级批准端点），届时再单独立任务。**注意红线仍生效**：批准端点只改 strategy_stages 阶段标记，绝不自动动钱/改交易配置（ADR-002/005）。
+
 
 - [ ] **RD.1** 在 ai-service 内置一个只读运维面板（单页，零构建）
   - **做什么**: 给 FastAPI 加一个 `GET /`（或 `/dashboard`）返回一个**单文件 HTML 页**（用 `fastapi.responses.HTMLResponse` + 内联 JS/CSS，或 Jinja2 模板；不引 React、不加构建步骤）。页面用浏览器 `fetch` 调现有接口，展示 4 块：
