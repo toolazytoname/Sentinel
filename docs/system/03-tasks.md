@@ -265,3 +265,112 @@
 - **freqtrade 强制风控项 OK**: `config.template.json` 里 `stoploss_on_exchange`、`MaxDrawdown`/`StoplossGuard`/`CooldownPeriod` 三件套、`max_open_trades:3` 均在（文件是 JSONC 带 `//` 注释，freqtrade 支持，别当成坏 JSON 去「修」）。
 - **fail-open 语义 OK**: `strategies/veto_gate.py` 的「网络/超时/坏响应一律放行」是 ADR-002 要求的正确行为，**不要**改成 fail-closed。
 - **199 个测试当前全绿**: 任何改动的基线就是它。改完必须仍全绿。
+
+---
+
+# Phase R2 — 二轮架构审查（2026-07-07 强模型 review 追加）
+
+> **接棒说明（含便宜模型）**：本节是在 RA/RC 修复落地后，架构师第二轮 review 的新发现，**Phase R 未覆盖**。
+> 执行规则同 Phase R 三条铁律（改完必须 `source .venv/bin/activate && python -m pytest -q` 全绿，基线现为 **209 passed**；优先用可搜索字符串定位；不改测试将就实现）。
+> **难度分级**（token 不够时按此分派）：
+> - 🟢 **可交便宜模型**：机械改动、有精确 diff、测试能兜底 → RB2.3 / RC2.1 / RC2.2 / RB2.2
+> - 🟡 **中等**：涉及安全语义或新表，需照着方案走、别自由发挥 → RS.1 / RS.2 / RB2.4
+> - 🧠 **必须强模型**：改部署/DB引擎/测试基建，动手前先写方案 → RS.3 / RB2.1 / RT.1
+
+## RS — 安全（HIGH，提交/上线前必修；security.md 红线）
+
+- [ ] **RS.1** 🟡 Telegram webhook 无来源校验，任何人可伪造 update 触发查询/回复
+  - **文件**: `ai-service/app/main.py` 的 `telegram_webhook`（搜索 `def telegram_webhook`）；`ai-service/app/notifier.py` 第 22 行注释已自认「不校验 X-Telegram-Bot-Api-Secret-Token」。
+  - **问题**: 端点接收任意 `dict` 就路由命令、读库、回消息。公网暴露时（见 RS.3）任何人 POST 伪造 `/status` 即可套出策略/复盘信息，或被刷量。
+  - **修复**:
+    1. Telegram 设置 webhook 时支持 `secret_token`，Telegram 每次回调会带 HTTP 头 `X-Telegram-Bot-Api-Secret-Token`。在 `.env.example` 增加 `TELEGRAM_WEBHOOK_SECRET`。
+    2. `telegram_webhook` 签名改为接收 `request: Request`（`from fastapi import Request`），读取 `request.headers.get("X-Telegram-Bot-Api-Secret-Token")`，与环境变量 `TELEGRAM_WEBHOOK_SECRET` 比对；不一致直接 `return {"ok": True}` 且不做任何处理（**返回 200 但静默丢弃**，不泄露信息、也不触发 Telegram 重试风暴）。secret 未配置时（本地 dev）记一条 warning 并放行，保持可测。
+    3. body 仍按现有方式解析（可用 `await request.json()`）。
+  - **验证/加测**: `ai-service/tests/test_telegram_webhook.py` 加两个用例：带正确 secret → 正常回复；带错误/缺失 secret 且环境配了 secret → 不调用 `notifier.send_message`。`python -m pytest ai-service/tests/test_telegram_webhook.py -q` 全绿。
+  - **DoD**: 配了 secret 时伪造 update 被静默丢弃且有测试覆盖；全量测试绿。
+
+- [ ] **RS.2** 🟡 缺失 LLM 密钥时静默 fallback 假 key（掩盖配置错误 → 全线 fail-open）
+  - **文件**: `ai-service/app/deps.py` 第 34 行 `os.environ.get("AGNES_API_KEY") or os.environ.get("OPENAI_API_KEY", "sk-fake-for-dev")`
+  - **问题**: 生产若忘配 key，会静默用 `sk-fake-for-dev` → 所有 LLM 调用 401 → 否决/研究/复盘全部 fail-open 或失败，**但服务照常起、healthz 照样绿**，故障隐形。违反 security.md「启动期校验必需密钥」。
+  - **修复**:
+    1. 增加环境变量 `SENTINEL_ENV`（`dev`|`prod`，默认 `dev`）。
+    2. 保留 dev 下的 `sk-fake-for-dev` 兜底（方便本地/测试）；但当 `SENTINEL_ENV=prod` 且未提供任何真实 key 时，在**启动期**（lifespan 或 `get_engine` 之前）抛错拒绝启动，错误信息明确「AGNES_API_KEY / OPENAI_API_KEY 必须设置」。
+    3. 不要在请求路径里才发现，要在 app 启动 fail-fast。
+  - **验证/加测**: 加测试：`SENTINEL_ENV=prod` 且无 key → 构造 app/调用配置校验函数抛预期异常；dev 无 key → 不抛。注意用 `reset_caches_for_testing()` 清 lru_cache。
+  - **DoD**: prod 缺 key 直接启动失败并给清晰信息；dev 不受影响；测试覆盖两条路径。
+
+- [ ] **RS.3** 🧠 部署加固：host 网络模式下 8000 端口的无鉴权端点暴露面
+  - **文件**: `deploy/docker-compose.yml`（ai-service 用 `network_mode: host`，监听 `127.0.0.1:8000`）；`deploy/RUNBOOK.md`
+  - **问题**: `/veto`、`/telegram/webhook`、`/strategy/*`、`/trade-close` 均无鉴权（设计上靠「只在本机被 freqtrade 调用」）。一旦 VPS 上服务监听到 `0.0.0.0` 或防火墙没关 8000，这些端点直接对公网开放（能读策略阶段、刷 veto、伪造 trade-close 造假复盘）。
+  - **修复方向**（动手前写方案，二选一或组合）:
+    1. 明确把 ai-service 绑定 `127.0.0.1`（确认 `AI_SERVICE_HOST=127.0.0.1` 真的生效、uvicorn 只听 loopback），并在 `RUNBOOK.md` 写死「VPS 防火墙必须 deny 8000/8080 外部入站，只留 SSH + 你自己的 IP」。
+    2. 对 `/trade-close`、`/strategy/*` 加一个简单的共享密钥头校验（`X-Sentinel-Token`，freqtrade webhook 配置里带上），内部调用也带 token。
+  - **DoD**: RUNBOOK 有明确的端口暴露/防火墙章节；关键写端点要么绑 loopback 要么有 token 校验；方案写清。**涉及真实部署安全，必须强模型，不确定问用户**。
+
+## RB2 — 健壮性 / 正确性（MED）
+
+- [ ] **RB2.1** 🧠 SQLite 并发写无保护，scheduler 线程 + 请求线程易「database is locked」
+  - **文件**: `ai-service/app/db/models.py` 第 112 行 `create_engine(url, echo=False, future=True)`
+  - **问题**: `BackgroundScheduler`（后台线程）写 `research_notes`，同时 FastAPI 请求线程写 `veto_records`/`reflections`。SQLite 默认单写者 + 无 busy timeout，并发下会抛 `database is locked`；且多线程用 SQLite 未设 `check_same_thread=False` 有隐患。设计文档 §2.4/ADR-007 本就规划 PostgreSQL，SQLite 只是临时。
+  - **修复方向**（二选一）:
+    1. **短期加固**（KISS）: `create_engine` 增加 `connect_args={"check_same_thread": False}`，并在连接后开启 WAL + busy_timeout（`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`，用 SQLAlchemy `event.listen(engine, "connect", ...)` 设置）。只对 sqlite URL 生效，Postgres URL 时跳过。
+    2. **按设计上 Postgres**: 与 RB.4（Alembic）一起做，`DATABASE_URL` 指向 postgres，docker-compose 取消注释 postgres 服务。
+  - **注意红线**: 不改任何表结构/字段名（契约）。只动 engine 创建与 PRAGMA。
+  - **验证/加测**: 加一个并发写小测试（两个线程各插一批 veto_records + research_notes）不报 locked。
+  - **DoD**: 并发写不再 locked；sqlite/postgres 两种 URL 都能起；测试覆盖。**🧠：涉及 DB 引擎与部署，先写方案**。
+
+- [ ] **RB2.2** 🟢 `veto_records` 无限增长（每次入场信号都插一行，无保留策略）
+  - **文件**: `ai-service/app/db/repository.py`（`insert_veto_record`）；`ai-service/app/scheduler.py`（加清理 job）
+  - **问题**: 每次 `confirm_trade_entry` 都 `GET /veto` → 插一行 veto_record。长期跑（尤其 dry-run 高频信号）表会膨胀，SQLite 体积和查询变慢。research_notes 同理。
+  - **修复**: 加一个 repository 函数 `purge_old_veto_records(session, keep_days=90)`（`DELETE WHERE created_at < cutoff`，参数化，别拼字符串），在 scheduler 的每日 job 里调一次（复用 `run_daily_stage_check` 之后，或新加一个 `run_daily_cleanup`）。`keep_days` 走环境变量 `RETENTION_DAYS`（默认 90），是**保留天数不是删除阈值**，别删反。
+  - **验证/加测**: 插 100/91 天前的旧记录 + 几条新记录 → 调清理 → 断言只剩新记录。
+  - **DoD**: 有可配置保留期的定时清理 + 测试；默认 90 天。
+
+- [ ] **RB2.3** 🟢 修 `datetime.utcnow()` 弃用用法 + 复盘响应用真实时间戳
+  - **文件**: `ai-service/app/main.py` 第 285 行 `created_at=datetime.utcnow(),`（在 `submit_reflection` 里）
+  - **问题**: ① `datetime.utcnow()` 在 Python 3.12+ 已弃用（本仓 venv 是 3.14），会有 DeprecationWarning，且返回 naive 时间。② 该处**伪造**了一个当前时间当 created_at 返回，而 RA.2 已经重新查到了真实 `row`，应直接用 `row.created_at`。
+  - **修复**: 把 `created_at=datetime.utcnow(),` 改成 `created_at=row.created_at if row else datetime.now(timezone.utc),`（`row` 变量来自 RA.2 已加的重新查库；确认文件顶部或函数内有 `from datetime import timezone`，没有就补 import）。顺带全仓 `grep -rn "utcnow()" ai-service strategies` 确认再无其它弃用点。
+  - **验证**: `python -m pytest ai-service/tests/test_api.py -q` 全绿；运行时无 utcnow 的 DeprecationWarning。
+  - **DoD**: 无 `datetime.utcnow()`；复盘响应 created_at 来自真实行；测试绿。
+
+- [ ] **RB2.4** 🟡 LLM 每次调用的 token/成本从不落库（P2.2 的 DoD 未达成）
+  - **文件**: `ai-service/app/llm/openai_compat.py`（`_extract_text` 丢弃了响应里的 `usage`）；需新增一张表/或复用日志
+  - **问题**: 设计 P2.2 明确要求「每次调用的 token 消耗落库可查」，当前 OpenAI 兼容响应里的 `usage.prompt_tokens/completion_tokens` 被直接丢弃，无法核算成本。
+  - **修复方向**（先做方案，注意这涉及新表 = schema 变更，**要和 RB.4 Alembic 协调**，别用裸 `create_all` 加表后又忘了迁移）:
+    1. 新增表 `llm_calls(id, model, model_tier, prompt_tokens, completion_tokens, total_tokens, created_at)`（若 RB.4 未落地，先在本任务注释标注「等 RB.4 统一迁移」）。
+    2. `complete()` 成功后从 `resp.json()["usage"]` 取三个数，写一行。为不阻塞主流程，写失败只记 warning 不抛。
+    3. 加只读接口/或让运维面板（未来）能查每日 token 汇总。
+  - **验证/加测**: mock 一个带 usage 的响应 → 断言落库一行且数值正确；无 usage 字段时不报错。
+  - **DoD**: 每次 LLM 调用的 token 数落库可查；测试覆盖有/无 usage 两种响应。**🟡：照方案走，新表务必走迁移不要裸建**。
+
+## RT — 测试基建（MED，解锁被 BLOCK 的 RB.3）
+
+- [ ] **RT.1** 🧠 统一 session 供给，使测试覆盖与生产 engine 一致（解锁 RB.3）
+  - **背景**: RB.3 被 BLOCK 的根因是——测试通过覆盖 FastAPI 依赖 `get_db` 注入测试 session，但 `ReflectionWriter` 内部若改用模块级 `get_session`，用的是另一个 engine，导致写入库 ≠ 读取库。这说明**测试基建对「非请求路径的 session」没有统一覆盖点**，是个真实的架构薄弱点。
+  - **问题**: 生产里 `get_db` 与 `get_session` 共享模块 engine（一致）；但测试只覆盖了 `get_db`，没覆盖 `get_session`。任何走 `get_session` 的后台/写库路径在测试里都指向真 engine。
+  - **修复方向**（先写方案）:
+    1. 让测试 fixture 在覆盖 `get_db` 的同时，也把模块 engine 指向同一个测试 DB（例如通过 `DATABASE_URL` 环境变量 + `reset_caches_for_testing()` + 重建 engine，确保 `get_session()` 和 `get_db()` 用同一个 in-memory/临时库）。
+    2. 或者引入一个统一的 `SessionProvider` 依赖，生产/测试都从它取，测试只覆盖这一个点。
+    3. 完成后**回到 RB.3**：把两处 `ReflectionWriter(extractor, lambda: db)` 改成 `get_session`（消除借用请求 session 被 `with` 关闭的问题），此时测试应能全绿。
+  - **DoD**: 测试里 `get_session` 与 `get_db` 指向同库；RB.3 的改动能通过全部测试；RB.3 随之标记完成。**🧠：测试基建重构，先写方案，别硬改**。
+
+## RC2 — 优化（LOW，token 不够可整批交便宜模型）
+
+- [ ] **RC2.1** 🟢 收敛配置读取到 pydantic Settings + 去掉重复 local import
+  - **文件**: `ai-service/app/deps.py`（`_settings()` 手搓 `os.environ.get`）；`ai-service/app/main.py`（`submit_reflection` 里第二次 local import `get_reflection_by_trade_id`，`trade_close` 里已 import 过）
+  - **问题**: ① 配置散在 `os.environ.get`，无类型/无校验，易拼错 key（security.md 要求边界校验）。② RA.2 引入的 local import 与 `trade_close` 内的重复。
+  - **修复**（小步、低风险）: ① 用 `pydantic-settings` 的 `BaseSettings` 定义一个 `Settings` 类集中声明所有环境变量（api_key/base_url/db_url/models/proxy/retention/env/webhook_secret），`_settings()` 返回它；保持默认值不变以不破坏现有测试。② 把 `get_reflection_by_trade_id` 提到 main.py 顶部 import 一次，删掉两处 local import。
+  - **验证**: `python -m pytest -q` 全绿（这是纯重构，行为不变，测试是唯一裁判）。
+  - **DoD**: 配置集中且有类型；无重复 local import；全测试绿。
+
+- [ ] **RC2.2** 🟢 docker-compose 代理硬编码改为 env 驱动
+  - **文件**: `deploy/docker-compose.yml`（`HTTPS_PROXY: "http://127.0.0.1:7890"` 等在 freqtrade 与 ai-service 两处硬编码）
+  - **问题**: 代理地址写死在编排文件里，VPS 上没有该本地代理时 LLM/交易所访问全部失败；也不利于「本机开发 vs VPS 部署」切换。
+  - **修复**: 改成 `HTTPS_PROXY: "${HTTPS_PROXY:-}"` 之类由 `.env` 注入（`.env.example` 增加 `HTTPS_PROXY=` 注释说明「国内本机填 http://127.0.0.1:7890；VPS 留空」）。默认留空 = 不走代理。
+  - **验证**: `cd deploy && docker compose config` 能正确渲染；不影响本机（本机 .env 里填上代理即可）。
+  - **DoD**: 代理不再硬编码；本机/VPS 靠 .env 切换；有注释说明。
+
+## 附：对 Phase R 既有任务的补充
+
+- **RC.3（策略向量化）的验收闸要加一条**：向量化改写后除了 `pytest strategies -q` 绿，还必须跑 `freqtrade lookahead-analysis`（04-handoff-guide.md 常见坑第 2 条）——向量化最容易在无意中引入未来函数。弱模型做 RC.3 时若无法跑 lookahead-analysis，**标 🧠 升级**，不要仅凭单测绿就判完成。
+- **RB.4（Alembic）与 RB2.4/RB2.1-方案2 强相关**：都涉及加表/迁移，建议合并到一次「上 Alembic + 迁移到 Postgres」的强模型任务里统一做，避免各自裸 `create_all` 造成迁移碎片。
