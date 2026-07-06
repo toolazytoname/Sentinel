@@ -33,13 +33,13 @@ services:
     # 用 python 做 ${VAR} 替换（镜像精简版无 envsubst）；生成 /tmp/dry-run-runtime.json
     # 不影响宿主机上保留占位符的 dry-run.json —— 这样敏感字段不会进 git
     entrypoint: ["/bin/sh", "-c"]
-    command: >
-      "python3 -c 'import os,sys; sys.stdout.write(open(\"/freqtrade/user_data/config/dry-run.json\").read().replace(\"${API_PASSWORD}\", os.environ.get(\"API_PASSWORD\",\"\")).replace(\"${API_JWT_SECRET}\", os.environ.get(\"API_JWT_SECRET\",\"\")))' > /tmp/dry-run-runtime.json &&
-       freqtrade trade
-       --logfile /freqtrade/user_data/logs/freqtrade.log
-       --db-url sqlite:///user_data/tradesv3.sqlite
-       --config /tmp/dry-run-runtime.json
-       --strategy S1TrendFollow"
+    command: >-
+      python3 -c 'import os,sys; sys.stdout.write(open("/freqtrade/user_data/config/dry-run.json").read().replace("${API_PASSWORD}", os.environ.get("API_PASSWORD","")).replace("${API_JWT_SECRET}", os.environ.get("API_JWT_SECRET","")))' > /tmp/dry-run-runtime.json &&
+      freqtrade trade
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:///user_data/tradesv3.sqlite
+      --config /tmp/dry-run-runtime.json
+      --strategy S1TrendFollow
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/ping"]
       interval: 30s
