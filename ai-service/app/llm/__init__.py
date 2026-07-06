@@ -6,6 +6,7 @@ from .client import (
     ResearchExtractor,
     VetoExtractor,
 )
+from .openai_compat import OpenAICompatibleClient
 
 __all__ = [
     "LLMClient",
@@ -14,4 +15,5 @@ __all__ = [
     "ReflectionExtractor",
     "ResearchExtractor",
     "VetoExtractor",
+    "OpenAICompatibleClient",
 ]
