@@ -86,7 +86,11 @@ def llm_veto(signal: TradeSignal, context: MarketContext, veto_extractor: VetoEx
 
 
 def _build_veto_prompt(signal: TradeSignal, context: MarketContext) -> str:
-    """Build the prompt for the LLM. Kept deterministic for testability."""
+    """Build the prompt for the LLM. Kept deterministic for testability.
+
+    The schema block at the bottom is the contract — LLM must reply with
+    ONLY this JSON shape. Field names are exact, not paraphrasable.
+    """
     return (
         f"You are reviewing a proposed trade for risk. "
         f"Rule-based checks have already passed; your job is to look for "
@@ -99,7 +103,12 @@ def _build_veto_prompt(signal: TradeSignal, context: MarketContext) -> str:
         f"Max allowed: {context.max_exposure_pct:.1%}\n"
         f"Recent high-severity events (24h): {context.recent_high_severity_events}\n"
         f"Upcoming event window: {context.upcoming_event_window_minutes} minutes\n\n"
-        f"Argue AGAINST this trade. Output your decision as JSON."
+        f"Argue AGAINST this trade.\n\n"
+        f"Reply with ONLY a JSON object matching this exact schema "
+        f"(field names are case-sensitive, do not rename):\n"
+        f'{{"veto": <true|false>, "reason": "<string, 5-500 chars>", "confidence": <0.0-1.0>}}\n'
+        f"Set veto=true ONLY if you identify a concrete risk the rules missed. "
+        f"Otherwise veto=false. No prose, no markdown, no code fences."
     )
 
 

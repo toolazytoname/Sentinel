@@ -24,12 +24,16 @@ from app.llm import (
 
 @lru_cache(maxsize=1)
 def _settings() -> dict:
-    """Load configuration once. Env-driven (12-factor)."""
+    """Load configuration once. Env-driven (12-factor).
+
+    Default base_url points at agnes-ai (OpenAI-compatible). Provider-agnostic —
+    override via env to point at DeepSeek / OpenAI / OpenRouter.
+    """
     return {
-        "api_key": os.environ.get("OPENAI_API_KEY", "sk-fake-for-dev"),
-        "base_url": os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
-        "quick_model": os.environ.get("LLM_QUICK_MODEL", "gpt-4o-mini"),
-        "deep_model": os.environ.get("LLM_DEEP_MODEL", "gpt-4o"),
+        "api_key": os.environ.get("AGNES_API_KEY") or os.environ.get("OPENAI_API_KEY", "sk-fake-for-dev"),
+        "base_url": os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_API_BASE", "https://apihub.agnes-ai.com/v1"),
+        "quick_model": os.environ.get("LLM_QUICK_MODEL", "agnes-2.0-flash"),
+        "deep_model": os.environ.get("LLM_DEEP_MODEL", "agnes-2.0-flash"),
         "https_proxy": os.environ.get("HTTPS_PROXY"),
         "db_url": os.environ.get("DATABASE_URL", "sqlite:///./sentinel.db"),
     }
