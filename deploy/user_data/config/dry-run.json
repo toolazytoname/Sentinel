@@ -18,11 +18,11 @@
         "secret": "",
         "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
         "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+        "enable_ws": false,
         "ccxt_config": {
             "enableRateLimit": true,
             "timeout": 30000,
-            "httpsProxy": "http://127.0.0.1:7890",
-            "aiohttp_trust_env": false,
+            "aiohttp_trust_env": true,
             "options": {
                 "defaultType": "spot",
                 "fetchMarkets": ["spot"]
@@ -32,7 +32,6 @@
             "enableRateLimit": true,
             "timeout": 30000,
             "httpsProxy": "http://127.0.0.1:7890",
-            "aiohttp_trust_env": false,
             "options": {
                 "defaultType": "spot",
                 "fetchMarkets": ["spot"]
