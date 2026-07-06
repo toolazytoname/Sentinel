@@ -116,6 +116,55 @@ class StageReportResponse(BaseModel):
     next_stage: Optional[str]
 
 
+# --- Trade close webhook (P2.5) ---
+
+class TradeCloseRequest(BaseModel):
+    """Payload posted by freqtrade's webhook when a trade (or sub-fill) closes.
+
+    Field names mirror freqtrade's RPCExitMsg (`freqtrade/freqtradebot.py`
+    `_notify_exit`) so the freqtrade side can forward the dict as-is via
+    its recursive_format webhook template. `strategy` is NOT supplied by
+    freqtrade — it's injected per-strategy in the freqtrade config (because
+    freqtrade doesn't know its own strategy name in the webhook context).
+
+    Only `is_final_exit=true` triggers a reflection — partial exits during
+    a single trade's life produce multiple EXIT_FILL events that we
+    intentionally discard (see docs/system/06-trade-close-webhook.md).
+    """
+    trade_id: int = Field(..., description="freqtrade Trade.id (DB primary key)")
+    strategy: str = Field(..., min_length=1, max_length=64)
+    pair: str = Field(..., min_length=1, max_length=32)
+    side: Literal["long", "short"] = "long"
+    direction: str = "Long"  # informational only — 'Long' / 'Short'
+    open_rate: float = Field(..., gt=0)
+    close_rate: float = Field(..., gt=0)
+    profit_ratio: float
+    profit_amount: float
+    open_date: datetime
+    close_date: datetime
+    exit_reason: str = "unknown"
+    enter_tag: str | None = None
+    stake_amount: float = Field(..., gt=0)
+    stake_currency: str = "USDT"
+    is_final_exit: bool = True
+    sub_trade: bool = False
+    # Free-form metadata freqtrade doesn't know about — strategy-side can add
+    extra: dict = Field(default_factory=dict)
+
+
+class TradeCloseResponse(BaseModel):
+    """Acknowledgement returned to freqtrade.
+
+    `skipped=True` covers two cases:
+      - duplicate webhook for an already-reflected trade_id (idempotency)
+      - non-final EXIT_FILL (partial fill mid-trade)
+    """
+    status: Literal["recorded", "skipped"]
+    trade_id: int
+    reason: str = ""
+    reflection_id: int | None = None
+
+
 # --- Health ---
 
 class HealthResponse(BaseModel):

@@ -342,6 +342,100 @@ def strategy_get(name: str, db: Session = Depends(get_db)):
     )
 
 
+# --- Trade close webhook (P2.5) ---
+
+@app.post(
+    "/trade-close",
+    response_model=schemas.TradeCloseResponse,
+    status_code=status.HTTP_200_OK,
+)
+def trade_close(
+    body: schemas.TradeCloseRequest,
+    db: Session = Depends(get_db),
+    extractor: ReflectionExtractor = Depends(get_reflection_extractor),
+):
+    """Receive freqtrade's webhook when a trade exits.
+
+    freqtrade emits one EXIT_FILL per fill, so a multi-fill exit produces
+    several webhooks. Only the final fill (`is_final_exit=true`) triggers
+    a reflection; partial fills return `skipped=true` so freqtrade sees a
+    clean 200 in its logs but we don't burn LLM calls on them.
+
+    Idempotency: if a reflection for this trade_id already exists (e.g.
+    freqtrade retried after a network blip, or someone re-ran a backtest
+    against a replayed trades DB), we short-circuit and return
+    `skipped=true` with reason "already_reflected".
+
+    LLM failures return 503 — freqtrade logs the error, but its own
+    trading flow is unaffected (webhook delivery is best-effort in
+    freqtrade).
+    """
+    from app.db.repository import get_reflection_by_trade_id
+
+    # 1. Idempotency: skip if we already have a reflection for this trade_id
+    existing = get_reflection_by_trade_id(db, str(body.trade_id), body.strategy)
+    if existing is not None:
+        return schemas.TradeCloseResponse(
+            status="skipped",
+            trade_id=body.trade_id,
+            reason="already_reflected",
+            reflection_id=existing.id,
+        )
+
+    # 2. Skip partial fills — only the final fill triggers reflection
+    if not body.is_final_exit or body.sub_trade:
+        return schemas.TradeCloseResponse(
+            status="skipped",
+            trade_id=body.trade_id,
+            reason="partial_fill",
+        )
+
+    # 3. Build TradeContext for the reflection writer
+    hold_hours = max(
+        0.001,
+        (body.close_date - body.open_date).total_seconds() / 3600.0,
+    )
+    signal_snapshot = {
+        "enter_tag": body.enter_tag,
+        "exit_reason": body.exit_reason,
+        "stake_amount": body.stake_amount,
+        "stake_currency": body.stake_currency,
+        "profit_amount": body.profit_amount,
+        "direction": body.direction,
+        **body.extra,
+    }
+    ctx = TradeContext(
+        trade_id=str(body.trade_id),
+        strategy=body.strategy,
+        pair=body.pair,
+        side=body.side,
+        entry_price=body.open_rate,
+        exit_price=body.close_rate,
+        profit_pct=body.profit_ratio,
+        hold_duration_hours=hold_hours,
+        signal_snapshot=signal_snapshot,
+        closed_at=body.close_date,
+    )
+
+    # 4. Run reflection writer (LLM + persist). 503 propagates on LLM failure.
+    writer = ReflectionWriter(extractor, lambda: db)
+    try:
+        writer.record(ctx)
+    except LLMUnavailable as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"LLM unavailable: {e}",
+        )
+
+    # 5. Re-query the persisted row to surface its DB id to the caller.
+    row = get_reflection_by_trade_id(db, str(body.trade_id), body.strategy)
+    return schemas.TradeCloseResponse(
+        status="recorded",
+        trade_id=body.trade_id,
+        reflection_id=row.id if row else None,
+    )
+
+
 # --- Telegram webhook ---
 
 @app.post("/telegram/webhook")

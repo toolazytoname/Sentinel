@@ -12,6 +12,7 @@ dst = (
     src
     .replace("${API_PASSWORD}", os.environ.get("API_PASSWORD", ""))
     .replace("${API_JWT_SECRET}", os.environ.get("API_JWT_SECRET", ""))
+    .replace("${AI_SERVICE_WEBHOOK_URL}", os.environ.get("AI_SERVICE_WEBHOOK_URL", "http://127.0.0.1:8000"))
 )
 open("/tmp/dry-run-runtime.json", "w").write(dst)
 PYEOF

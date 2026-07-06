@@ -65,6 +65,34 @@
         }
     },
 
+    "webhook": {
+        "enabled": true,
+        "url": "${AI_SERVICE_WEBHOOK_URL}",
+        "format": "json",
+        "retries": 2,
+        "retry_delay": 5,
+        "timeout": 10,
+        "exit_fill": {
+            "trade_id": "{trade_id}",
+            "strategy": "S1TrendFollow",
+            "pair": "{pair}",
+            "direction": "{direction}",
+            "open_rate": "{open_rate}",
+            "close_rate": "{close_rate}",
+            "profit_ratio": "{profit_ratio}",
+            "profit_amount": "{profit_amount}",
+            "open_date": "{open_date}",
+            "close_date": "{close_date}",
+            "exit_reason": "{exit_reason}",
+            "enter_tag": "{enter_tag}",
+            "stake_amount": "{stake_amount}",
+            "stake_currency": "{stake_currency}",
+            "is_final_exit": "{is_final_exit}",
+            "sub_trade": "{sub_trade}",
+            "side": "long"
+        }
+    },
+
     "api_server": {
         "enabled": true,
         "listen_ip_address": "0.0.0.0",

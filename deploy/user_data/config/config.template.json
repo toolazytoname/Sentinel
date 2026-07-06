@@ -125,6 +125,39 @@
         }
     },
 
+    // ──────────────────── Webhook (P2.5) ────────────────────
+    // freqtrade 在 EXIT_FILL 时向 ai-service 推送平仓事件，触发自动 reflection
+    // 详见 docs/system/06-trade-close-webhook.md
+    // URL 通过 ${AI_SERVICE_WEBHOOK_URL} 在 start.sh 里注入（默认 http://127.0.0.1:8000）
+    // strategy 硬编码：freqtrade 不知道自己的策略名，dict 里放非 str 值走 recursive_format 原样保留
+    "webhook": {
+        "enabled": true,
+        "url": "${AI_SERVICE_WEBHOOK_URL}",
+        "format": "json",
+        "retries": 2,
+        "retry_delay": 5,
+        "timeout": 10,
+        "exit_fill": {
+            "trade_id": "{trade_id}",
+            "strategy": "S1TrendFollow",
+            "pair": "{pair}",
+            "direction": "{direction}",
+            "open_rate": "{open_rate}",
+            "close_rate": "{close_rate}",
+            "profit_ratio": "{profit_ratio}",
+            "profit_amount": "{profit_amount}",
+            "open_date": "{open_date}",
+            "close_date": "{close_date}",
+            "exit_reason": "{exit_reason}",
+            "enter_tag": "{enter_tag}",
+            "stake_amount": "{stake_amount}",
+            "stake_currency": "{stake_currency}",
+            "is_final_exit": "{is_final_exit}",
+            "sub_trade": "{sub_trade}",
+            "side": "long"
+        }
+    },
+
     // ──────────────────── API Server（FreqUI 后端） ────────────────────
     "api_server": {
         "enabled": true,

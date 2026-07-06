@@ -97,6 +97,23 @@ def reflections_for_strategy(session: Session, strategy: str, limit: int = 20) -
     return session.execute(stmt).scalars().all()
 
 
+def get_reflection_by_trade_id(
+    session: Session, trade_id: str, strategy: str | None = None,
+) -> ReflectionRow | None:
+    """Lookup one reflection by its (strategy, trade_id) pair.
+
+    Used by P2.5 webhook idempotency — when freqtrade replays an
+    EXIT_FILL, we don't want to generate a second reflection for the
+    same trade. `strategy` is part of the key because two strategies
+    could theoretically reuse the same trade_id across separate
+    freqtrade instances (each has its own SQLite DB).
+    """
+    stmt = select(ReflectionRow).where(ReflectionRow.trade_id == trade_id)
+    if strategy is not None:
+        stmt = stmt.where(ReflectionRow.strategy == strategy)
+    return session.execute(stmt).scalar_one_or_none()
+
+
 # --- Veto records ---
 
 def insert_veto_record(
