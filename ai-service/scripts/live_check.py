@@ -148,4 +148,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        rc = main()
+    finally:
+        # Clean up the temp live-check DB so we don't leave artifacts behind.
+        # Skip if it was overridden to a non-default path.
+        if os.environ.get("DATABASE_URL") == "sqlite:///./live_check.db":
+            try:
+                os.remove("live_check.db")
+            except FileNotFoundError:
+                pass
+    sys.exit(rc)
