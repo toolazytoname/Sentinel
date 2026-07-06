@@ -173,7 +173,8 @@
 
 ## RC — 工程质量（不致命但影响可维护性 / 违反项目规约）
 
-- [ ] **RC.1** 消除 `StrategyBase` / `veto_gate` 双副本漂移风险
+- [x] **RC.1** 消除 `StrategyBase` / `veto_gate` 双副本漂移风险
+  ✅ 完成于 2026-07-07，备注：新增 `strategies/tests/test_deploy_sync.py`（AST 归一化比对，8 个参数化用例）——比对 confirm_trade_entry 签名、共享常量、deploy 内联 check_veto 与 veto_gate 等价、两侧 fail-open 分支存在。对文档/import 差异宽容，能抓到 fail-open→fail-closed 回归（校验 subagent 独立复现 RED）。全量 209 passed。
   - **背景**: `strategies/base.py` 与 `deploy/user_data/strategies/base.py` 是**手工维护的两份副本**（freqtrade 容器只挂载 `deploy/user_data/strategies/`，读不到仓库根的 `strategies/` 包），现已确认内容漂移。`check_veto` 逻辑也被内联复制进了 deploy 版。手工同步迟早出事。
   - **修复方向**（KISS，二选一）:
     1. **加一个漂移守卫测试**（最省事，推荐先做）: 在 `strategies/tests/` 新增 `test_deploy_sync.py`，读取两份文件的**核心逻辑部分**（如 `confirm_trade_entry`、`check_veto` 的函数体），断言它们等价；不一致就测试红。这样至少 CI/pytest 会拦住漂移。
