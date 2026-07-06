@@ -108,7 +108,8 @@
   - **验证**: `python -m pytest ai-service/tests/test_scheduler.py -q` 全绿。
   - **DoD**: 新测试存在且覆盖告警路径；199+1 个测试全绿。
 
-- [ ] **RA.2** 修 `POST /reflection` 返回的 `id` 永远是 0
+- [x] **RA.2** 修 `POST /reflection` 返回的 `id` 永远是 0
+  ✅ 完成于 2026-07-07，备注：仿 `trade_close` 写库后按 trade_id 重新查库取真实主键，新增 id>0 测试（修复前 RED），全量 201 passed；独立做未依赖 RB.3，`lambda: db` 接线保持不动。
   - **文件**: `ai-service/app/main.py`
   - **定位**: 搜索字符串 `id=0,  # writer inserted but didn't return id`（约第 276 行，`submit_reflection` 函数内）
   - **问题**: 复盘写库成功后，接口把 `ReflectionResponse.id` 硬编码成 `0` 返回给调用方，调用方拿不到真实主键，无法后续引用这条复盘。

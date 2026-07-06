@@ -347,3 +347,31 @@ def test_strategy_get_404_for_unknown():
         client = TestClient(app)
         resp = client.get("/strategy/DoesNotExist/stage")
         assert resp.status_code == 404
+
+
+def _reflection_payload() -> dict:
+    """Build a full POST /reflection request body for a closed trade."""
+    return {
+        "trade_id": "t1",
+        "strategy": "S1TrendFollow",
+        "pair": "BTC/USDT",
+        "side": "long",
+        "entry_price": 100.0,
+        "exit_price": 110.0,
+        "profit_pct": 0.10,
+        "hold_duration_hours": 6.0,
+        "signal_snapshot": {"enter_tag": "adx"},
+        "closed_at": "2026-07-06T08:00:00Z",
+    }
+
+
+def test_reflection_submit_returns_real_primary_key():
+    """POST /reflection persists and returns the real DB id (not hardcoded 0)."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.post("/reflection", json=_reflection_payload())
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["trade_id"] == "t1"
+        assert body["id"] > 0, "reflection id must be the real DB primary key"

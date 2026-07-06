@@ -272,8 +272,10 @@ def submit_reflection(
             detail=f"LLM unavailable: {e}",
         )
 
+    from app.db.repository import get_reflection_by_trade_id
+    row = get_reflection_by_trade_id(db, ctx.trade_id, body.strategy)
     return schemas.ReflectionResponse(
-        id=0,  # writer inserted but didn't return id; could refactor
+        id=row.id if row else 0,
         trade_id=reflection.trade_id,
         strategy=body.strategy,
         what_worked=reflection.what_worked,
