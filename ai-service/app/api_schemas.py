@@ -30,6 +30,18 @@ class VetoResponse(BaseModel):
     source: Literal["rule", "llm", "llm_unavailable"]
 
 
+class StrategyVetoResponse(BaseModel):
+    """Compact response shape for the strategy-side GET /veto endpoint.
+
+    Mirrors the contract that `strategies.veto_gate.check_veto` (and the
+    deployed `S1TrendFollow.py`) expects: a `decision` field with PASS/VETO,
+    plus an optional `reason` for logging. The AI service performs the audit
+    internally and translates the detailed result into this shape.
+    """
+    decision: Literal["PASS", "VETO"]
+    reason: str = ""
+
+
 # --- Research ---
 
 class ResearchRequest(BaseModel):

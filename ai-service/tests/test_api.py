@@ -196,6 +196,98 @@ def test_veto_fail_open_when_llm_down():
         assert body["source"] == "llm_unavailable"
 
 
+# --- Strategy-facing GET /veto ---
+
+def test_get_veto_pass_when_no_events():
+    """Strategy-side endpoint: returns {decision: PASS} when rules + LLM pass."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="looks fine", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1TrendFollow", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "PASS"
+        assert isinstance(body["reason"], str)
+
+
+def test_get_veto_blocks_on_recent_high_severity_event():
+    """Rule layer: recent severity>=4 research note on the asset → VETO."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="all clear", confidence=0.5))
+    with _build_app_with_fake_llm(router) as app_ctx:
+        client = TestClient(app_ctx)
+        # Seed a high-severity event for ETH
+        client.post(
+            "/research/note",
+            json={
+                "asset": "ETH",
+                "event_type": "regulatory",
+                "severity": 5,
+                "summary": "ETH ETF rejected by regulator",
+                "source_url": "https://example.com/eth",
+                "published_at": "2026-07-06T08:00:00Z",
+            },
+        )
+        # Query for ETH/USDT → should VETO via rule layer
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "ETH/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "VETO"
+        assert "high_severity_event" in body["reason"]
+        # Rule must short-circuit — LLM must not have been called
+        assert len(router.calls) == 0
+
+
+def test_get_veto_does_not_block_unrelated_asset():
+    """A high-severity event for BTC must NOT block an ETH entry."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="eth looks fine", confidence=0.6))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        client.post(
+            "/research/note",
+            json={
+                "asset": "BTC",
+                "event_type": "regulatory",
+                "severity": 5,
+                "summary": "BTC news",
+                "source_url": "https://example.com/btc",
+                "published_at": "2026-07-06T08:00:00Z",
+            },
+        )
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "ETH/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "PASS"
+
+
+def test_get_veto_fail_open_on_llm_outage():
+    """Strategy-side: LLM down → PASS (never block due to AI outage)."""
+    router = FakeLLMRouter(
+        VetoDecision(veto=False, reason="no risk", confidence=0.5),
+        raise_unavailable=True,
+    )
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "PASS"
+        assert "llm_unavailable" in body["reason"]
+
+
+def test_get_veto_blocks_when_llm_vetoes():
+    """Strategy-side: LLM vetoes → decision=VETO with LLM's reason."""
+    router = FakeLLMRouter(
+        VetoDecision(veto=True, reason="concentration risk too high", confidence=0.8)
+    )
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "VETO"
+        assert "concentration" in body["reason"]
+
+
 def test_research_note_submit_and_persist():
     with _build_app_with_fake_llm(FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))):
         client = TestClient(app)

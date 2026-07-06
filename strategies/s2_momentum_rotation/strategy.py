@@ -134,13 +134,19 @@ def rotation_plan(
 # ---- freqtrade adapter ----
 
 try:
-    from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
+    from freqtrade.strategy import IntParameter, DecimalParameter
 
-    class S2MomentumRotation(IStrategy):
-        """freqtrade-compatible rotation strategy. Wires pure functions above."""
+    from strategies.base import StrategyBase
+
+    class S2MomentumRotation(StrategyBase):
+        """freqtrade-compatible rotation strategy. Wires pure functions above.
+
+        Inherits confirm_trade_entry → AI veto from StrategyBase.
+        """
         timeframe = "1d"
         can_short = False
         startup_candle_count = 60  # need 30d momentum + warmup
+        stoploss = -0.10
 
         # Hyperopt ranges — narrow to prevent overfit
         universe_size = IntParameter(5, 20, default=10, space="buy")

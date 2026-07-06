@@ -35,6 +35,7 @@ from app.db.repository import (
     insert_reflection,
     insert_research_note,
     insert_veto_record,
+    recent_high_severity_assets,
 )
 from app.llm import LLMClient, LLMUnavailable
 from app.llm import ReflectionExtractor, ResearchExtractor, VetoExtractor
@@ -97,6 +98,56 @@ def audit_veto(
     )
     return schemas.VetoResponse(
         veto=result.veto, reason=result.reason, source=result.source
+    )
+
+
+@app.get("/veto", response_model=schemas.StrategyVetoResponse)
+def strategy_veto(
+    strategy: str,
+    pair: str,
+    db: Session = Depends(get_db),
+    veto_extractor: VetoExtractor = Depends(get_veto_extractor),
+) -> schemas.StrategyVetoResponse:
+    """Compact veto endpoint for live strategy use.
+
+    Contract (matches `strategies.veto_gate.check_veto` and the deployed
+    `S1TrendFollow.py`):
+      GET /veto?strategy=S1TrendFollow&pair=BTC/USDT
+        → {"decision": "PASS" | "VETO", "reason": "<short string>"}
+
+    The strategy side treats the LLM/AI service as an additional safety net
+    and defaults to PASS on any error or timeout — never blocks trading due
+    to AI service failure (ADR-002 fail-open).
+    """
+    # Conservative defaults for signal-time veto calls. The strategy knows
+    # nothing about the rest of the book; the AI service derives what it can
+    # from DB state (recent high-severity events) and uses fixed safe limits.
+    base_asset = pair.split("/")[0]
+    high_sev_assets = recent_high_severity_assets(db, since_hours=24)
+    context = MarketContext(
+        recent_high_severity_events=[base_asset] if base_asset in high_sev_assets else [],
+        current_total_exposure_pct=0.0,  # strategy doesn't know the book; rule 2 disabled
+        max_exposure_pct=1.0,            # disabled (no real exposure info)
+        upcoming_event_window_minutes=0,
+    )
+    signal = TradeSignal(
+        strategy=strategy,
+        pair=pair,
+        side="long",
+        stake_pct=0.05,
+    )
+    result = audit(signal, context, veto_extractor)
+    insert_veto_record(
+        db,
+        strategy=strategy,
+        pair=pair,
+        veto=result.veto,
+        reason=result.reason,
+        source=result.source,
+    )
+    return schemas.StrategyVetoResponse(
+        decision="VETO" if result.veto else "PASS",
+        reason=result.reason,
     )
 
 

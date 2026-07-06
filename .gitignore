@@ -64,6 +64,15 @@ user_data/*.sqlite-wal
 user_data/*.sqlite
 user_data/*.sqlite-journal
 user_data/backtest_results/
+# 部署目录下的同名运行时产物（freqtrade 在 deploy/user_data/ 下）
+deploy/user_data/data/
+deploy/user_data/logs/
+deploy/user_data/tradesv3.sqlite*
+deploy/user_data/*.sqlite-shm
+deploy/user_data/*.sqlite-wal
+deploy/user_data/*.sqlite
+deploy/user_data/*.sqlite-journal
+deploy/user_data/backtest_results/
 freqtrade_data/
 
 # ===== Docker / 部署 =====

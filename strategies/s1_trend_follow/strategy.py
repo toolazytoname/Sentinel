@@ -125,17 +125,21 @@ def exit_signal(
 # ---- freqtrade adapter (only loads when freqtrade IStrategy is available) ----
 
 try:
-    from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
+    from freqtrade.strategy import DecimalParameter
 
-    class S1TrendFollow(IStrategy):
+    from strategies.base import StrategyBase
+
+    class S1TrendFollow(StrategyBase):
         """freqtrade-compatible strategy class.
 
         Tested via the pure functions above; this class wires them into the
-        freqtrade callback protocol.
+        freqtrade callback protocol. Inherits confirm_trade_entry → AI veto
+        from StrategyBase.
         """
         timeframe = "1d"
         can_short = False
         startup_candle_count = 220  # warmup for 200 EMA
+        stoploss = -0.10  # freqtrade hard floor (custom_stoploss tightens this)
 
         # Parameter spaces for hyperopt (P1.4 — keep narrow to avoid overfit)
         adx_entry = DecimalParameter(20.0, 35.0, default=25.0, space="buy")
@@ -173,6 +177,19 @@ try:
                 if pd.notna(row["adx"]) and row["adx"] < params.adx_exit_threshold:
                     dataframe.iat[i, dataframe.columns.get_loc("exit_long")] = 1
             return dataframe
+
+        def custom_stoploss(self, *args, **kwargs) -> float:
+            """Tighten stop as trade moves in our favour.
+
+            In profit → trail by trailing_stop_pct. Always at least hard_stop.
+            """
+            hard = -float(self.hard_stop.value)
+            # freqtrade passes current_profit as kwarg
+            current_profit = kwargs.get("current_profit")
+            if current_profit is not None and current_profit > 0:
+                trail = -float(self.trailing_stop_pct.value)
+                return max(hard, trail)
+            return hard
 
 except ImportError:
     # freqtrade not installed locally — pure-logic functions still usable for testing

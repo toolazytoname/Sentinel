@@ -1,7 +1,8 @@
 """S1: Trend-following strategy for freqtrade dry-run / live.
 
 Self-contained — no external package imports so it works inside the freqtrade
-Docker image without mounting the strategies/ package.
+Docker image without mounting the strategies/ package. Shared AI-veto logic
+lives in `base.py` (same directory).
 
 Logic
 -----
@@ -16,19 +17,18 @@ Exit (priority order):
   4. ADX collapse: ADX < 18
 
 Veto (confirm_trade_entry):
-  Calls AI service GET /veto?strategy=S1TrendFollow&pair=<pair> before
-  each entry. On any error / timeout, defaults to PASS (fail-open).
+  Inherited from base.StrategyBase. Calls AI service GET /veto?strategy=&pair=
+  before each entry. On any error / timeout, defaults to PASS (fail-open).
 """
 from __future__ import annotations
 
 import logging
-import urllib.request
-import urllib.error
-import json
 
 import numpy as np
 import pandas as pd
-from freqtrade.strategy import IStrategy, DecimalParameter
+from freqtrade.strategy import DecimalParameter
+
+from base import StrategyBase
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +40,6 @@ ADX_ENTRY = 25.0
 ADX_EXIT = 18.0
 HARD_STOP_PCT = 0.08
 TRAILING_STOP_PCT = 0.05
-
-AI_SERVICE_URL = "http://127.0.0.1:8000"
-VETO_TIMEOUT_S = 3  # fail-open after 3 s
 
 
 # ── Pure indicator helpers ─────────────────────────────────────────────────
@@ -80,10 +77,12 @@ def _adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 # ── Freqtrade strategy ─────────────────────────────────────────────────────
 
-class S1TrendFollow(IStrategy):
-    """Trend-following strategy. Timeframe: 1d."""
+class S1TrendFollow(StrategyBase):
+    """Trend-following strategy. Timeframe: 1d.
 
-    INTERFACE_VERSION = 3
+    Inherits confirm_trade_entry (AI veto) from StrategyBase.
+    """
+
     timeframe = "1d"
     can_short = False
     startup_candle_count = 220  # warmup for 200-period EMA
@@ -146,14 +145,7 @@ class S1TrendFollow(IStrategy):
         ).astype(int)
         return dataframe
 
-    def custom_stoploss(
-        self,
-        current_time,
-        current_rate: float,
-        current_profit: float,
-        trade,
-        **kwargs,
-    ) -> float:
+    def custom_stoploss(self, *args, **kwargs) -> float:
         """Tighten stop as trade moves in our favour.
 
         Returns the stoploss as a fraction of current_rate (negative = stop
@@ -161,39 +153,9 @@ class S1TrendFollow(IStrategy):
         (tightest) of this and the static stoploss.
         """
         hard = -float(self.hard_stop.value)
-        if current_profit > 0:
+        current_profit = kwargs.get("current_profit")
+        if current_profit is not None and current_profit > 0:
             # Once in profit, trail at trailing_stop_p from current_rate
             trail = -float(self.trailing_stop_p.value)
             return max(hard, trail)
         return hard
-
-    # ── Veto gate (P1.7) ─────────────────────────────────────────────────
-
-    def confirm_trade_entry(
-        self,
-        pair: str,
-        order_type: str,
-        amount: float,
-        rate: float,
-        time_in_force: str,
-        current_time,
-        entry_tag,
-        side: str,
-        **kwargs,
-    ) -> bool:
-        """Ask AI service for a veto before entering. Fail-open on any error."""
-        url = f"{AI_SERVICE_URL}/veto?strategy=S1TrendFollow&pair={pair}"
-        try:
-            with urllib.request.urlopen(url, timeout=VETO_TIMEOUT_S) as resp:
-                body = json.loads(resp.read())
-            decision = body.get("decision", "PASS")
-            if decision == "VETO":
-                reason = body.get("reason", "no reason provided")
-                logger.warning("VETO blocked entry %s %s: %s", pair, order_type, reason)
-                return False
-            return True
-        except Exception as exc:
-            logger.warning(
-                "AI veto service unreachable (%s) — defaulting PASS for %s", exc, pair
-            )
-            return True
