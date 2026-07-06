@@ -25,7 +25,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, status
+import os
+
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app import api_schemas as schemas
@@ -449,6 +451,7 @@ def trade_close(
 @app.post("/telegram/webhook")
 def telegram_webhook(
     update: dict,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     notifier: TelegramNotifier = Depends(get_notifier),
 ) -> dict:
@@ -457,11 +460,30 @@ def telegram_webhook(
     Always returns 200 (Telegram retries on non-2xx). Non-command
     messages and updates without text are ignored.
 
+    Source verification: when TELEGRAM_WEBHOOK_SECRET is set (production),
+    Telegram sends header `X-Telegram-Bot-Api-Secret-Token: <secret>` on
+    every callback (configured via setWebhook's `secret_token`). We drop
+    any update whose header doesn't match — silently, with a 200, so a
+    probe learns nothing and Telegram doesn't retry. When the secret is
+    unset (local/dev) we log a warning and proceed unverified.
+
     Supported commands:
       /status           → list all strategies + current stage
       /status <name>    → detail one strategy (stage + last reflections)
       /help, /start     → command list
     """
+    expected = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if expected:
+        if x_telegram_bot_api_secret_token != expected:
+            logger.warning(
+                "telegram webhook: secret token mismatch — dropping update (silent 200)"
+            )
+            return {"ok": True}
+    else:
+        logger.warning(
+            "TELEGRAM_WEBHOOK_SECRET not set — webhook source not verified (dev only)"
+        )
+
     msg = update.get("message") or {}
     text = (msg.get("text") or "").strip()
     chat_id_raw = msg.get("chat", {}).get("id")

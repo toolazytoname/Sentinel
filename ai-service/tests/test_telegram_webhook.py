@@ -235,6 +235,71 @@ def test_update_without_message_is_silently_ignored():
         _teardown_app()
 
 
+# --- Webhook source verification (RS.1) -----------------------------------
+
+def test_secret_set_correct_header_is_processed(monkeypatch):
+    """Secret configured + matching header → command processed normally."""
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "s3cr3t")
+    app_obj, notifier = _build_app()
+    try:
+        client = TestClient(app_obj)
+        resp = client.post(
+            "/telegram/webhook",
+            json=_make_update("/help"),
+            headers={"X-Telegram-Bot-Api-Secret-Token": "s3cr3t"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        notifier.send_message.assert_called_once()
+    finally:
+        _teardown_app()
+
+
+def test_secret_set_wrong_header_is_silently_dropped(monkeypatch):
+    """Secret configured + wrong header → silent 200, no processing, no reply."""
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "s3cr3t")
+    app_obj, notifier = _build_app()
+    try:
+        client = TestClient(app_obj)
+        resp = client.post(
+            "/telegram/webhook",
+            json=_make_update("/help"),
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        notifier.send_message.assert_not_called()
+    finally:
+        _teardown_app()
+
+
+def test_secret_set_missing_header_is_silently_dropped(monkeypatch):
+    """Secret configured + no header → silent 200, no processing, no reply."""
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "s3cr3t")
+    app_obj, notifier = _build_app()
+    try:
+        client = TestClient(app_obj)
+        resp = client.post("/telegram/webhook", json=_make_update("/help"))
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        notifier.send_message.assert_not_called()
+    finally:
+        _teardown_app()
+
+
+def test_secret_unset_dev_path_still_processes(monkeypatch):
+    """No secret configured (dev) → processed as before, no header needed."""
+    monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
+    app_obj, notifier = _build_app()
+    try:
+        client = TestClient(app_obj)
+        resp = client.post("/telegram/webhook", json=_make_update("/help"))
+        assert resp.status_code == 200
+        notifier.send_message.assert_called_once()
+    finally:
+        _teardown_app()
+
+
 # --- Reply routes to originating chat -------------------------------------
 
 def test_reply_uses_originating_chat_id():

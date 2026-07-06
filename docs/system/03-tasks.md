@@ -280,7 +280,8 @@
 
 ## RS — 安全（HIGH，提交/上线前必修；security.md 红线）
 
-- [ ] **RS.1** 🟡 Telegram webhook 无来源校验，任何人可伪造 update 触发查询/回复
+- [x] **RS.1** 🟡 Telegram webhook 无来源校验，任何人可伪造 update 触发查询/回复
+  ✅ 完成于 2026-07-07，备注：handler 顶部校验 `X-Telegram-Bot-Api-Secret-Token` 头 vs 环境 `TELEGRAM_WEBHOOK_SECRET`；配了 secret 时不匹配→静默 200 丢弃（不处理/不回复/不触发重试），dev 未配→告警放行保持可测；`.env.example` 已加说明。新增 4 用例（monkeypatch 隔离 env）。全量 213 passed。
   - **文件**: `ai-service/app/main.py` 的 `telegram_webhook`（搜索 `def telegram_webhook`）；`ai-service/app/notifier.py` 第 22 行注释已自认「不校验 X-Telegram-Bot-Api-Secret-Token」。
   - **问题**: 端点接收任意 `dict` 就路由命令、读库、回消息。公网暴露时（见 RS.3）任何人 POST 伪造 `/status` 即可套出策略/复盘信息，或被刷量。
   - **修复**:
