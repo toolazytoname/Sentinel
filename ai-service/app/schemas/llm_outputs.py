@@ -35,7 +35,7 @@ class ResearchNote(BaseModel):
 class VetoDecision(BaseModel):
     """LLM-as-devil's-advocate output. Per ADR-002: LLM can only VETO."""
     veto: bool
-    reason: str = Field(..., min_length=5, max_length=500)
+    reason: str = Field(..., min_length=5, max_length=200)
     confidence: float = Field(..., ge=0.0, le=1.0)
 
 

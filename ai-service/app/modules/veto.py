@@ -103,10 +103,10 @@ def _build_veto_prompt(signal: TradeSignal, context: MarketContext) -> str:
         f"Max allowed: {context.max_exposure_pct:.1%}\n"
         f"Recent high-severity events (24h): {context.recent_high_severity_events}\n"
         f"Upcoming event window: {context.upcoming_event_window_minutes} minutes\n\n"
-        f"Argue AGAINST this trade.\n\n"
+        f"Argue AGAINST this trade in ONE concise sentence (max 200 chars).\n\n"
         f"Reply with ONLY a JSON object matching this exact schema "
         f"(field names are case-sensitive, do not rename):\n"
-        f'{{"veto": <true|false>, "reason": "<string, 5-500 chars>", "confidence": <0.0-1.0>}}\n'
+        f'{{"veto": <true|false>, "reason": "<string, 5-200 chars>", "confidence": <0.0-1.0>}}\n'
         f"Set veto=true ONLY if you identify a concrete risk the rules missed. "
         f"Otherwise veto=false. No prose, no markdown, no code fences."
     )
