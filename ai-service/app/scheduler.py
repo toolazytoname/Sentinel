@@ -21,6 +21,8 @@ Configuration (env vars, all optional):
   - SCHEDULER_STAGE_CRON      (default: "30 9 * * *")     — daily 09:30 UTC
   - SCHEDULER_WEEKLY_CRON     (default: "0 10 * * 0")     — Sunday 10:00 UTC
   - SCHEDULER_VETO_CRON       (default: "*/15 * * * *")   — every 15 min (LLM veto precompute)
+  - SCHEDULER_CLEANUP_CRON    (default: "0 10 * * *")     — daily 10:00 UTC (record retention sweep)
+  - RETENTION_DAYS            (default: 90)               — kept-days for veto_records / research_notes
 
 The scheduler is intentionally thin — it composes existing module
 functions (ResearchIngester, check_stage_upgrade) so each job stays
@@ -242,6 +244,37 @@ def run_llm_veto_precompute(session_factory, veto_extractor, notifier=None) -> N
     )
 
 
+def run_daily_cleanup(session_factory, retention_days: int = 90) -> dict[str, int]:
+    """Bound unbounded growth in veto_records + research_notes (RB2.2).
+
+    Deletes any row whose `created_at` is older than `retention_days`. The
+    default 90 days keeps a useful audit trail while preventing the SQLite
+    volume from ballooning under high-frequency dry-run signals. Override
+    with the `RETENTION_DAYS` env var. Returned counts are useful for
+    smoke-testing and ops visibility.
+    """
+    from app.db.repository import (
+        purge_old_research_notes,
+        purge_old_veto_records,
+    )
+
+    with session_factory() as session:
+        deleted_notes = purge_old_research_notes(session, keep_days=retention_days)
+
+    with session_factory() as session:
+        deleted_vetoes = purge_old_veto_records(session, keep_days=retention_days)
+
+    logger.info(
+        "daily cleanup: deleted %d research_notes + %d veto_records older than %d days",
+        deleted_notes, deleted_vetoes, retention_days,
+    )
+    return {
+        "research_notes_deleted": deleted_notes,
+        "veto_records_deleted": deleted_vetoes,
+        "retention_days": retention_days,
+    }
+
+
 # --- Scheduler wrapper ---
 
 @dataclass(frozen=True)
@@ -252,6 +285,8 @@ class SchedulerConfig:
     stage_cron: str
     weekly_cron: str
     veto_cron: str
+    cleanup_cron: str
+    retention_days: int
 
     @classmethod
     def from_env(cls) -> "SchedulerConfig":
@@ -261,6 +296,8 @@ class SchedulerConfig:
             stage_cron=os.environ.get("SCHEDULER_STAGE_CRON", "30 9 * * *"),
             weekly_cron=os.environ.get("SCHEDULER_WEEKLY_CRON", "0 10 * * 0"),
             veto_cron=os.environ.get("SCHEDULER_VETO_CRON", "*/15 * * * *"),
+            cleanup_cron=os.environ.get("SCHEDULER_CLEANUP_CRON", "0 10 * * *"),
+            retention_days=_env_int("RETENTION_DAYS", default=90),
         )
 
 
@@ -269,6 +306,16 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 class SentinelScheduler:
@@ -359,12 +406,28 @@ class SentinelScheduler:
                 coalesce=True,
             )
 
+        # Daily retention sweep — bound growth in veto_records + research_notes
+        self._scheduler.add_job(
+            lambda: safe_run(
+                "daily_cleanup",
+                lambda: run_daily_cleanup(
+                    self._session_factory, self._config.retention_days,
+                ),
+            ),
+            CronTrigger.from_crontab(self._config.cleanup_cron, timezone="UTC"),
+            id="daily_cleanup",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         self._scheduler.start()
         logger.info(
-            "scheduler started: research=%s stage=%s weekly=%s veto=%s",
+            "scheduler started: research=%s stage=%s weekly=%s veto=%s cleanup=%s(retention=%dd)",
             self._config.research_cron, self._config.stage_cron,
             self._config.weekly_cron,
             self._config.veto_cron if self._veto_extractor is not None else "disabled",
+            self._config.cleanup_cron, self._config.retention_days,
         )
 
     def stop(self) -> None:

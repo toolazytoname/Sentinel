@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -60,6 +60,27 @@ def recent_high_severity_assets(session: Session, since_hours: int = 24) -> set[
         .distinct()
     )
     return {row[0] for row in session.execute(stmt).all()}
+
+
+def purge_old_research_notes(session: Session, keep_days: int = 90) -> int:
+    """Delete research_notes rows older than `keep_days`. Returns deleted count.
+
+    Bounds unbounded growth from the daily ingestion job. The cutoff is computed
+    in UTC and parameterized via SQLAlchemy bound values (no string concat), so
+    the input is never injected into SQL.
+    """
+    from datetime import timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
+    stmt = delete(ResearchNoteRow).where(ResearchNoteRow.created_at < cutoff)
+    result = session.execute(stmt)
+    session.commit()
+    return int(result.rowcount or 0)
+
+
+def count_research_notes(session: Session) -> int:
+    """Total row count — used by retention tests and ops dashboards."""
+    stmt = select(ResearchNoteRow.id)
+    return len(session.execute(stmt).all())
 
 
 # --- Reflections ---
@@ -150,6 +171,29 @@ def recent_vetoes(session: Session, since_hours: int = 24) -> Sequence[VetoRecor
         .order_by(desc(VetoRecordRow.created_at))
     )
     return session.execute(stmt).scalars().all()
+
+
+def purge_old_veto_records(session: Session, keep_days: int = 90) -> int:
+    """Delete veto_records rows older than `keep_days`. Returns deleted count.
+
+    Bounds unbounded growth from confirm_trade_entry → GET /veto (every entry
+    signal inserts one row). The cutoff is computed in UTC and parameterized
+    via SQLAlchemy bound values (no string concat), so the input is never
+    injected into SQL. `keep_days` is the retention window — anything OLDER
+    than `keep_days` is deleted; anything newer is kept.
+    """
+    from datetime import timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
+    stmt = delete(VetoRecordRow).where(VetoRecordRow.created_at < cutoff)
+    result = session.execute(stmt)
+    session.commit()
+    return int(result.rowcount or 0)
+
+
+def count_veto_records(session: Session) -> int:
+    """Total row count — used by retention tests and ops dashboards."""
+    stmt = select(VetoRecordRow.id)
+    return len(session.execute(stmt).all())
 
 
 def recent_veto_query_pairs(

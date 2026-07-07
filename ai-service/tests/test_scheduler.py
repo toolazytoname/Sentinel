@@ -24,6 +24,7 @@ from app.scheduler import (  # noqa: E402
     SchedulerConfig,
     SentinelScheduler,
     safe_run,
+    run_daily_cleanup,
     run_daily_research,
     run_daily_stage_check,
     run_llm_veto_precompute,
@@ -291,13 +292,15 @@ def test_scheduler_disabled_does_not_start(monkeypatch):
     s.stop()  # idempotent
 
 
-def test_scheduler_starts_and_registers_three_jobs(monkeypatch):
+def test_scheduler_starts_and_registers_four_jobs(monkeypatch):
     s = _build_scheduler(monkeypatch, enabled=True)
     s.start()
     try:
         assert s.is_running
         ids = set(s.job_ids())
-        assert ids == {"daily_research", "daily_stage_check", "weekly_rollup"}
+        assert ids == {
+            "daily_research", "daily_stage_check", "weekly_rollup", "daily_cleanup",
+        }
     finally:
         s.stop()
     assert not s.is_running
@@ -318,14 +321,14 @@ def test_scheduler_registers_veto_job_when_extractor_wired(monkeypatch):
         ids = set(s.job_ids())
         assert ids == {
             "daily_research", "daily_stage_check", "weekly_rollup",
-            "llm_veto_precompute",
+            "llm_veto_precompute", "daily_cleanup",
         }
     finally:
         s.stop()
 
 
 def test_scheduler_omits_veto_job_without_extractor(monkeypatch):
-    """No extractor → no veto job (keeps the three-job baseline unchanged)."""
+    """No extractor → no veto job (keeps the four-job baseline unchanged)."""
     s = _build_scheduler(monkeypatch, enabled=True)  # no veto_extractor
     s.start()
     try:
@@ -340,8 +343,8 @@ def test_scheduler_start_is_idempotent(monkeypatch):
     s.start()  # must not raise or duplicate
     try:
         assert s.is_running
-        # Still three jobs after second start
-        assert len(s.job_ids()) == 3
+        # Still four jobs after second start
+        assert len(s.job_ids()) == 4
     finally:
         s.stop()
 
@@ -362,7 +365,7 @@ def test_scheduler_isolates_job_failure(monkeypatch, caplog):
     try:
         # Manually fire safe_run via the registered lambda and verify it logs
         original_jobs = list(s._scheduler.get_jobs())  # type: ignore[union-attr]
-        assert len(original_jobs) == 3
+        assert len(original_jobs) == 4
 
         # Find the research job's func and invoke safe_run with a boom — should not raise
         with caplog.at_level("ERROR"):
@@ -371,6 +374,146 @@ def test_scheduler_isolates_job_failure(monkeypatch, caplog):
         # Scheduler still alive after the simulated failure
         assert s.is_running
         # And other jobs are still scheduled
-        assert len(s.job_ids()) == 3
+        assert len(s.job_ids()) == 4
     finally:
         s.stop()
+
+
+# --- RB2.2: retention sweep for veto_records + research_notes ---
+
+
+def test_purge_old_veto_records_keeps_new_deletes_old():
+    """100/91-day-old rows are deleted; fresh rows survive (per task DoD)."""
+    from app.db.models import VetoRecordRow
+    from app.db.repository import (
+        count_veto_records,
+        purge_old_veto_records,
+    )
+
+    sf = _make_session_factory()
+    old = datetime.now(timezone.utc) - timedelta(days=100)
+    borderline_old = datetime.now(timezone.utc) - timedelta(days=91)
+    fresh = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    with sf() as s:
+        for pair, when in (
+            ("BTC/USDT", old),
+            ("ETH/USDT", borderline_old),
+            ("BTC/USDT", fresh),
+            ("ETH/USDT", fresh),
+        ):
+            s.add(VetoRecordRow(
+                strategy="S1", pair=pair, signal_time=when,
+                veto=False, reason="ok", source="rule", created_at=when,
+            ))
+        s.commit()
+
+    with sf() as s:
+        deleted = purge_old_veto_records(s, keep_days=90)
+    assert deleted == 2  # the two old rows
+
+    with sf() as s:
+        remaining = count_veto_records(s)
+    assert remaining == 2  # only the fresh rows survive
+
+
+def test_purge_old_research_notes_keeps_new_deletes_old():
+    """Same logic for research_notes — symmetrical coverage."""
+    from app.db.models import ResearchNoteRow
+    from app.db.repository import (
+        count_research_notes,
+        purge_old_research_notes,
+    )
+
+    sf = _make_session_factory()
+    old = datetime.now(timezone.utc) - timedelta(days=200)
+    borderline = datetime.now(timezone.utc) - timedelta(days=91)
+    fresh = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    with sf() as s:
+        for when, sev in ((old, 2), (borderline, 3), (fresh, 5)):
+            s.add(ResearchNoteRow(
+                asset="BTC", event_type="regulation", severity=sev,
+                summary="x", source_url="u", published_at="2024-01-01T00:00:00Z",
+                created_at=when,
+            ))
+        s.commit()
+
+    with sf() as s:
+        deleted = purge_old_research_notes(s, keep_days=90)
+    assert deleted == 2
+
+    with sf() as s:
+        remaining = count_research_notes(s)
+    assert remaining == 1
+
+
+def test_run_daily_cleanup_returns_counts_and_respects_retention_days():
+    """Job returns the deleted counts and respects the keep_days argument."""
+    from app.db.models import ResearchNoteRow, VetoRecordRow
+
+    sf = _make_session_factory()
+    old = datetime.now(timezone.utc) - timedelta(days=120)
+    fresh = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    with sf() as s:
+        for _ in range(3):
+            s.add(VetoRecordRow(
+                strategy="S1", pair="BTC/USDT", signal_time=old,
+                veto=False, reason="ok", source="rule", created_at=old,
+            ))
+        s.add(VetoRecordRow(
+            strategy="S1", pair="BTC/USDT", signal_time=fresh,
+            veto=False, reason="ok", source="rule", created_at=fresh,
+        ))
+        s.add(ResearchNoteRow(
+            asset="BTC", event_type="regulation", severity=2,
+            summary="x", source_url="u", published_at="2024-01-01T00:00:00Z",
+            created_at=old,
+        ))
+        s.commit()
+
+    # retention_days=30 should remove the 120-day-old rows AND the "fresh" one
+    # (only 1h old but the keep window is 30d). We pick 30 to confirm the arg
+    # is honored, not the default.
+    result = run_daily_cleanup(sf, retention_days=30)
+    assert result["veto_records_deleted"] == 3
+    assert result["research_notes_deleted"] == 1
+    assert result["retention_days"] == 30
+
+
+def test_run_daily_cleanup_keeps_rows_within_retention_window():
+    """Default 90-day retention must NOT touch rows younger than 90 days."""
+    from app.db.models import VetoRecordRow
+
+    sf = _make_session_factory()
+    fresh = datetime.now(timezone.utc) - timedelta(days=89)
+    with sf() as s:
+        s.add(VetoRecordRow(
+            strategy="S1", pair="BTC/USDT", signal_time=fresh,
+            veto=False, reason="ok", source="rule", created_at=fresh,
+        ))
+        s.commit()
+
+    result = run_daily_cleanup(sf, retention_days=90)
+    assert result["veto_records_deleted"] == 0
+    assert result["research_notes_deleted"] == 0
+
+
+def test_run_daily_cleanup_empty_db_is_noop():
+    """No rows → no errors and zero counts."""
+    sf = _make_session_factory()
+    result = run_daily_cleanup(sf)
+    assert result == {
+        "research_notes_deleted": 0,
+        "veto_records_deleted": 0,
+        "retention_days": 90,
+    }
+
+
+def test_scheduler_config_parses_retention_days(monkeypatch):
+    """RETENTION_DAYS env var wires through to SchedulerConfig.retention_days."""
+    monkeypatch.setenv("RETENTION_DAYS", "30")
+    config = SchedulerConfig.from_env()
+    assert config.retention_days == 30
+    assert config.cleanup_cron == "0 10 * * *"  # default

@@ -329,7 +329,8 @@
   - **验证/加测**: 加一个并发写小测试（两个线程各插一批 veto_records + research_notes）不报 locked。
   - **DoD**: 并发写不再 locked；sqlite/postgres 两种 URL 都能起；测试覆盖。**🧠：涉及 DB 引擎与部署，先写方案**。
 
-- [ ] **RB2.2** 🟢 `veto_records` 无限增长（每次入场信号都插一行，无保留策略）
+- [x] **RB2.2** 🟢 `veto_records` 无限增长（每次入场信号都插一行，无保留策略）
+  ✅ 完成于 2026-07-07，备注：repository 新增 purge_old_veto_records / purge_old_research_notes（参数化 DELETE，bound value 不拼字符串）+ count_* helper；scheduler 新增 run_daily_cleanup(sf, retention_days) 返回删除条数 dict；SchedulerConfig 加 cleanup_cron (默认 "0 10 * * *") + retention_days (RETENTION_DAYS env 默认 90)；SentinelScheduler.start() 末尾注册 daily_cleanup job。原 3-job scheduler 测试改为 4-job。新增 6 用例（每表 100/91 天边界 + 默认 90d 不动 + retention_days=30 显式覆盖 + 空库 noop + RETENTION_DAYS env 解析）。全量 274 passed, 2 skipped。
   - **文件**: `ai-service/app/db/repository.py`（`insert_veto_record`）；`ai-service/app/scheduler.py`（加清理 job）
   - **问题**: 每次 `confirm_trade_entry` 都 `GET /veto` → 插一行 veto_record。长期跑（尤其 dry-run 高频信号）表会膨胀，SQLite 体积和查询变慢。research_notes 同理。
   - **修复**: 加一个 repository 函数 `purge_old_veto_records(session, keep_days=90)`（`DELETE WHERE created_at < cutoff`，参数化，别拼字符串），在 scheduler 的每日 job 里调一次（复用 `run_daily_stage_check` 之后，或新加一个 `run_daily_cleanup`）。`keep_days` 走环境变量 `RETENTION_DAYS`（默认 90），是**保留天数不是删除阈值**，别删反。
