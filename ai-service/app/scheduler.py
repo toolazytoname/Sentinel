@@ -20,6 +20,7 @@ Configuration (env vars, all optional):
   - SCHEDULER_RESEARCH_CRON   (default: "0 9 * * *")      — daily 09:00 UTC
   - SCHEDULER_STAGE_CRON      (default: "30 9 * * *")     — daily 09:30 UTC
   - SCHEDULER_WEEKLY_CRON     (default: "0 10 * * 0")     — Sunday 10:00 UTC
+  - SCHEDULER_VETO_CRON       (default: "*/15 * * * *")   — every 15 min (LLM veto precompute)
 
 The scheduler is intentionally thin — it composes existing module
 functions (ResearchIngester, check_stage_upgrade) so each job stays
@@ -149,6 +150,93 @@ def run_weekly_rollup(session_factory, notifier=None) -> None:
         notifier.send_weekly_summary(by_strategy)
 
 
+def run_llm_veto_precompute(session_factory, veto_extractor, notifier=None) -> None:
+    """Async LLM devil's-advocate veto precompute (ADR-002, docs §2.2).
+
+    Keeps GET /veto fast by moving the (slow, deep-tier) LLM veto OFF the request
+    path: this job runs on a cron, evaluates the pairs the strategy has recently
+    asked about, and writes any LLM veto to `veto_records` with source="llm".
+    GET /veto then honors a fresh precomputed LLM veto without ever calling the
+    LLM in-request.
+
+    Fail-open per ADR-002: a per-pair LLM outage is logged and SKIPPED (we never
+    write a VETO on doubt), and one pair's failure never aborts the rest.
+    """
+    from app.db.repository import (
+        insert_veto_record,
+        recent_high_severity_assets,
+        recent_veto_query_pairs,
+    )
+    from app.llm import LLMUnavailable
+    from app.modules.veto import MarketContext, TradeSignal, llm_veto
+
+    # Read the candidate set + shared rule-1 context once.
+    with session_factory() as session:
+        pairs = recent_veto_query_pairs(session)
+        high_sev_assets = recent_high_severity_assets(session, since_hours=24)
+
+    if not pairs:
+        logger.info("llm veto precompute: no recent query pairs, nothing to do")
+        return
+
+    written = 0
+    for strategy, pair in pairs:
+        try:
+            # Build the same context GET /veto uses: rule-1 asset list from DB
+            # state, exposure disabled (the AI service doesn't know the book).
+            base_asset = pair.split("/")[0]
+            context = MarketContext(
+                recent_high_severity_events=(
+                    [base_asset] if base_asset in high_sev_assets else []
+                ),
+                current_total_exposure_pct=0.0,
+                max_exposure_pct=1.0,
+                upcoming_event_window_minutes=0,
+            )
+            signal = TradeSignal(
+                strategy=strategy, pair=pair, side="long", stake_pct=0.05,
+            )
+            decision = llm_veto(signal, context, veto_extractor)
+
+            with session_factory() as session:
+                insert_veto_record(
+                    session,
+                    strategy=strategy,
+                    pair=pair,
+                    veto=decision.veto,
+                    reason=decision.reason,
+                    source="llm",
+                )
+            written += 1
+            if decision.veto:
+                logger.info(
+                    "llm veto precompute: VETO %s %s — %s",
+                    strategy, pair, decision.reason,
+                )
+                if notifier is not None:
+                    # Optional alert; a log line is the contract, keep it simple.
+                    logger.info(
+                        "llm veto precompute alert: %s %s vetoed", strategy, pair,
+                    )
+        except LLMUnavailable as exc:
+            # Fail-open: skip this pair, do NOT write a VETO row.
+            logger.warning(
+                "llm veto precompute: LLM unavailable for %s %s, skipping: %s",
+                strategy, pair, exc,
+            )
+            continue
+        except Exception:  # noqa: BLE001 - one pair must not abort the rest
+            logger.exception(
+                "llm veto precompute: unexpected failure for %s %s", strategy, pair,
+            )
+            continue
+
+    logger.info(
+        "llm veto precompute: evaluated %d pairs, wrote %d records",
+        len(pairs), written,
+    )
+
+
 # --- Scheduler wrapper ---
 
 @dataclass(frozen=True)
@@ -158,6 +246,7 @@ class SchedulerConfig:
     research_cron: str
     stage_cron: str
     weekly_cron: str
+    veto_cron: str
 
     @classmethod
     def from_env(cls) -> "SchedulerConfig":
@@ -166,6 +255,7 @@ class SchedulerConfig:
             research_cron=os.environ.get("SCHEDULER_RESEARCH_CRON", "0 9 * * *"),
             stage_cron=os.environ.get("SCHEDULER_STAGE_CRON", "30 9 * * *"),
             weekly_cron=os.environ.get("SCHEDULER_WEEKLY_CRON", "0 10 * * 0"),
+            veto_cron=os.environ.get("SCHEDULER_VETO_CRON", "*/15 * * * *"),
         )
 
 
@@ -186,11 +276,13 @@ class SentinelScheduler:
         ingester,
         session_factory,
         notifier=None,
+        veto_extractor=None,
     ):
         self._config = config
         self._ingester = ingester
         self._session_factory = session_factory
         self._notifier = notifier
+        self._veto_extractor = veto_extractor
         self._scheduler: BackgroundScheduler | None = None
 
     def start(self) -> None:
@@ -243,10 +335,31 @@ class SentinelScheduler:
             coalesce=True,
         )
 
+        # Async LLM veto precompute — only when an extractor is wired (opt-in;
+        # keeps existing scheduler tests, which pass no extractor, unchanged).
+        if self._veto_extractor is not None:
+            self._scheduler.add_job(
+                lambda: safe_run(
+                    "llm_veto_precompute",
+                    lambda: run_llm_veto_precompute(
+                        self._session_factory,
+                        self._veto_extractor,
+                        self._notifier,
+                    ),
+                ),
+                CronTrigger.from_crontab(self._config.veto_cron, timezone="UTC"),
+                id="llm_veto_precompute",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+
         self._scheduler.start()
         logger.info(
-            "scheduler started: research=%s stage=%s weekly=%s",
-            self._config.research_cron, self._config.stage_cron, self._config.weekly_cron,
+            "scheduler started: research=%s stage=%s weekly=%s veto=%s",
+            self._config.research_cron, self._config.stage_cron,
+            self._config.weekly_cron,
+            self._config.veto_cron if self._veto_extractor is not None else "disabled",
         )
 
     def stop(self) -> None:

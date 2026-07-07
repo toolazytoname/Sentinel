@@ -152,6 +152,49 @@ def recent_vetoes(session: Session, since_hours: int = 24) -> Sequence[VetoRecor
     return session.execute(stmt).scalars().all()
 
 
+def recent_veto_query_pairs(
+    session: Session, since_hours: int = 24,
+) -> list[tuple[str, str]]:
+    """Distinct (strategy, pair) tuples the strategy has queried within the window.
+
+    Every GET /veto call persists a veto_records row, so this is the set of
+    (strategy, pair) combinations actually seen recently — the candidate set the
+    async LLM-veto precompute job should evaluate (rather than the full universe
+    of pairs, most of which are never traded).
+    """
+    from datetime import timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    stmt = (
+        select(VetoRecordRow.strategy, VetoRecordRow.pair)
+        .where(VetoRecordRow.created_at >= cutoff)
+        .distinct()
+    )
+    return [(row[0], row[1]) for row in session.execute(stmt).all()]
+
+
+def latest_llm_veto(
+    session: Session, strategy: str, pair: str, within_minutes: int,
+) -> VetoRecordRow | None:
+    """Most recent `source="llm"` veto_records row for (strategy, pair), if fresh.
+
+    Returns the newest LLM-sourced row whose `created_at` is within
+    `within_minutes` of now, else None. Used by GET /veto to honor an
+    asynchronously precomputed LLM veto without making an in-request LLM call.
+    """
+    from datetime import timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=within_minutes)
+    stmt = (
+        select(VetoRecordRow)
+        .where(VetoRecordRow.strategy == strategy)
+        .where(VetoRecordRow.pair == pair)
+        .where(VetoRecordRow.source == "llm")
+        .where(VetoRecordRow.created_at >= cutoff)
+        .order_by(desc(VetoRecordRow.created_at))
+        .limit(1)
+    )
+    return session.execute(stmt).scalars().first()
+
+
 # --- LLM call token usage (P2.2 DoD) ---
 
 def insert_llm_call(

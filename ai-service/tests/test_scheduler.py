@@ -26,6 +26,7 @@ from app.scheduler import (  # noqa: E402
     safe_run,
     run_daily_research,
     run_daily_stage_check,
+    run_llm_veto_precompute,
     run_weekly_rollup,
 )
 
@@ -154,6 +155,88 @@ def test_run_weekly_rollup_handles_empty_db(caplog):
     assert any("no reflections" in r.message for r in caplog.records)
 
 
+# --- LLM veto precompute ----------------------------------------------------
+
+from app.llm import LLMUnavailable  # noqa: E402
+from app.schemas import VetoDecision  # noqa: E402
+
+
+class _PairAwareVetoExtractor:
+    """Fake VetoExtractor. Raises for a chosen pair, vetoes everything else.
+
+    llm_veto() calls .extract(prompt); the prompt embeds `Pair: <pair>`, so we
+    can simulate a per-pair LLM outage while still processing other pairs.
+    """
+
+    def __init__(self, *, raise_for_pair: str | None = None, veto: bool = True):
+        self.raise_for_pair = raise_for_pair
+        self._veto = veto
+        self.calls = 0
+
+    def extract(self, prompt: str) -> VetoDecision:
+        self.calls += 1
+        if self.raise_for_pair and f"Pair: {self.raise_for_pair}" in prompt:
+            raise LLMUnavailable("simulated outage")
+        return VetoDecision(veto=self._veto, reason="precompute risk found", confidence=0.9)
+
+
+def _seed_query_pair(sf, strategy: str, pair: str) -> None:
+    """Seed a veto_records row so the pair is a precompute candidate."""
+    from app.db.repository import insert_veto_record
+
+    with sf() as s:
+        insert_veto_record(
+            s, strategy=strategy, pair=pair,
+            veto=False, reason="rules_passed", source="rules_passed",
+        )
+
+
+def _llm_veto_rows(sf):
+    from app.db.repository import recent_vetoes
+
+    with sf() as s:
+        return [r for r in recent_vetoes(s, since_hours=24) if r.source == "llm"]
+
+
+def test_run_llm_veto_precompute_writes_llm_veto_row():
+    sf = _make_session_factory()
+    _seed_query_pair(sf, "S1", "BTC/USDT")
+
+    ext = _PairAwareVetoExtractor(veto=True)
+    run_llm_veto_precompute(sf, ext)
+
+    rows = _llm_veto_rows(sf)
+    assert len(rows) == 1
+    assert rows[0].strategy == "S1"
+    assert rows[0].pair == "BTC/USDT"
+    assert rows[0].veto is True
+    assert rows[0].reason == "precompute risk found"
+    assert ext.calls == 1
+
+
+def test_run_llm_veto_precompute_skips_pair_on_llm_unavailable():
+    """A per-pair LLM outage writes no VETO and does not abort the other pairs."""
+    sf = _make_session_factory()
+    _seed_query_pair(sf, "S1", "BTC/USDT")  # will raise
+    _seed_query_pair(sf, "S1", "ETH/USDT")  # will succeed
+
+    ext = _PairAwareVetoExtractor(raise_for_pair="BTC/USDT", veto=True)
+    run_llm_veto_precompute(sf, ext)  # must not raise
+
+    rows = _llm_veto_rows(sf)
+    # BTC failed (fail-open, no row); ETH succeeded (one llm veto row).
+    assert {(r.strategy, r.pair) for r in rows} == {("S1", "ETH/USDT")}
+    assert ext.calls == 2  # both pairs attempted
+
+
+def test_run_llm_veto_precompute_no_pairs_is_noop():
+    sf = _make_session_factory()
+    ext = _PairAwareVetoExtractor(veto=True)
+    run_llm_veto_precompute(sf, ext)  # must not raise
+    assert ext.calls == 0
+    assert _llm_veto_rows(sf) == []
+
+
 # --- SchedulerConfig --------------------------------------------------------
 
 def test_scheduler_config_defaults(monkeypatch):
@@ -161,11 +244,13 @@ def test_scheduler_config_defaults(monkeypatch):
     monkeypatch.delenv("SCHEDULER_RESEARCH_CRON", raising=False)
     monkeypatch.delenv("SCHEDULER_STAGE_CRON", raising=False)
     monkeypatch.delenv("SCHEDULER_WEEKLY_CRON", raising=False)
+    monkeypatch.delenv("SCHEDULER_VETO_CRON", raising=False)
     cfg = SchedulerConfig.from_env()
     assert cfg.enabled is True
     assert cfg.research_cron == "0 9 * * *"
     assert cfg.stage_cron == "30 9 * * *"
     assert cfg.weekly_cron == "0 10 * * 0"
+    assert cfg.veto_cron == "*/15 * * * *"
 
 
 def test_scheduler_config_can_be_disabled(monkeypatch):
@@ -216,6 +301,37 @@ def test_scheduler_starts_and_registers_three_jobs(monkeypatch):
     finally:
         s.stop()
     assert not s.is_running
+
+
+def test_scheduler_registers_veto_job_when_extractor_wired(monkeypatch):
+    """The LLM-veto precompute job is opt-in: only registered with an extractor."""
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    config = SchedulerConfig.from_env()
+    s = SentinelScheduler(
+        config,
+        ingester=MagicMock(spec=ResearchIngester),
+        session_factory=_make_session_factory(),
+        veto_extractor=_PairAwareVetoExtractor(veto=False),
+    )
+    s.start()
+    try:
+        ids = set(s.job_ids())
+        assert ids == {
+            "daily_research", "daily_stage_check", "weekly_rollup",
+            "llm_veto_precompute",
+        }
+    finally:
+        s.stop()
+
+
+def test_scheduler_omits_veto_job_without_extractor(monkeypatch):
+    """No extractor → no veto job (keeps the three-job baseline unchanged)."""
+    s = _build_scheduler(monkeypatch, enabled=True)  # no veto_extractor
+    s.start()
+    try:
+        assert "llm_veto_precompute" not in s.job_ids()
+    finally:
+        s.stop()
 
 
 def test_scheduler_start_is_idempotent(monkeypatch):

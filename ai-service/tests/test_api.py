@@ -312,6 +312,110 @@ def test_get_veto_ignores_llm_veto_on_hot_path():
         assert len(router.calls) == 0
 
 
+# --- GET /veto honors ASYNC precomputed LLM veto (source="llm") ---
+
+def _seed_llm_veto(*, strategy, pair, veto, reason, age_minutes=0):
+    """Insert a source="llm" veto_records row on the app's shared engine.
+
+    Uses the module get_session() (bound to the test engine inside the
+    _build_app_with_fake_llm context) so the row is visible to GET /veto.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.db import get_session
+    from app.db.repository import insert_veto_record
+
+    s = get_session()
+    try:
+        row = insert_veto_record(
+            s, strategy=strategy, pair=pair, veto=veto, reason=reason, source="llm",
+        )
+        if age_minutes:
+            row.created_at = datetime.now(timezone.utc) - timedelta(minutes=age_minutes)
+            s.commit()
+    finally:
+        s.close()
+
+
+def test_get_veto_returns_precomputed_llm_veto_without_calling_llm():
+    """Rules pass + a fresh source="llm" veto row → VETO, and NO in-request LLM."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        _seed_llm_veto(
+            strategy="S1", pair="BTC/USDT", veto=True,
+            reason="precomputed black swan risk",
+        )
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "VETO"
+        assert body["reason"] == "precomputed black swan risk"
+        # Hot path must never touch the LLM, even when honoring an LLM veto.
+        assert len(router.calls) == 0
+
+
+def test_get_veto_ignores_stale_llm_veto():
+    """An LLM veto row older than the TTL is ignored → PASS."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        _seed_llm_veto(
+            strategy="S1", pair="BTC/USDT", veto=True,
+            reason="stale risk", age_minutes=60,  # TTL default is 15 min
+        )
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "PASS"
+        assert body["reason"] == "rules_passed"
+        assert len(router.calls) == 0
+
+
+def test_get_veto_llm_pass_row_does_not_block():
+    """A fresh source="llm" row with veto=False must not block the trade."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        _seed_llm_veto(
+            strategy="S1", pair="BTC/USDT", veto=False, reason="llm cleared it",
+        )
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        assert resp.json()["decision"] == "PASS"
+        assert len(router.calls) == 0
+
+
+def test_get_veto_rule_veto_takes_priority_over_llm_row():
+    """When a rule vetoes, GET /veto returns the rule veto (LLM row not needed)."""
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router) as app_ctx:
+        client = TestClient(app_ctx)
+        # Seed a high-severity event so the rule layer vetoes ETH.
+        client.post(
+            "/research/note",
+            json={
+                "asset": "ETH",
+                "event_type": "regulatory",
+                "severity": 5,
+                "summary": "ETH regulatory shock",
+                "source_url": "https://example.com/eth",
+                "published_at": "2026-07-06T08:00:00Z",
+            },
+        )
+        # Also seed a fresh (different) llm veto row for the same pair.
+        _seed_llm_veto(
+            strategy="S1", pair="ETH/USDT", veto=True, reason="llm-specific reason",
+        )
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "ETH/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "VETO"
+        # Rule reason wins — the rule fired first, short-circuiting the LLM lookup.
+        assert "high_severity_event" in body["reason"]
+        assert len(router.calls) == 0
+
+
 def test_research_note_submit_and_persist():
     with _build_app_with_fake_llm(FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))):
         client = TestClient(app)

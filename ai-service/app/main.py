@@ -47,6 +47,7 @@ from app.db.repository import (
     insert_reflection,
     insert_research_note,
     insert_veto_record,
+    latest_llm_veto,
     recent_high_severity_assets,
 )
 from app.llm import LLMClient, LLMUnavailable
@@ -61,6 +62,21 @@ from app.modules.veto import MarketContext, TradeSignal, audit, check_rules
 from app.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
+
+# Default freshness window (minutes) for a precomputed LLM veto to still count.
+# Kept small so a stale async decision can't block trading indefinitely.
+DEFAULT_VETO_LLM_TTL_MIN = 15
+
+
+def _veto_llm_ttl_min() -> int:
+    """Read VETO_LLM_TTL_MIN from env, falling back to the default on any junk."""
+    raw = os.environ.get("VETO_LLM_TTL_MIN")
+    if not raw:
+        return DEFAULT_VETO_LLM_TTL_MIN
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_VETO_LLM_TTL_MIN
 
 
 # --- Lifespan: scheduler lifecycle ---
@@ -78,7 +94,7 @@ async def lifespan(app: FastAPI):
     from app.notifier import NotifierConfig, TelegramNotifier
     from app.scheduler import SchedulerConfig, SentinelScheduler
 
-    from app.deps import validate_required_secrets
+    from app.deps import validate_required_secrets, get_veto_extractor
 
     # Fail fast: refuse to start a misconfigured prod deploy (no real LLM key)
     # rather than running blind on the dev fake-key fallback.
@@ -98,6 +114,7 @@ async def lifespan(app: FastAPI):
         ingester=ingester,
         session_factory=get_session,
         notifier=notifier,
+        veto_extractor=get_veto_extractor(),
     )
     scheduler.start()
     app.state.scheduler = scheduler
@@ -174,11 +191,14 @@ def strategy_veto(
       GET /veto?strategy=S1TrendFollow&pair=BTC/USDT
         → {"decision": "PASS" | "VETO", "reason": "<short string>"}
 
-    Runs ONLY the deterministic rule layer (fast, <200ms) — it does NOT call
-    the LLM. The strategy side calls this with a tight (~3s) timeout and
-    fails-open on any error/timeout, so a synchronous deep-tier LLM call here
-    would always time out and be dead weight. The full rule+LLM audit lives
-    on POST /audit/veto (internal / future async use).
+    Runs the deterministic rule layer (fast, <200ms) and, if the rules pass,
+    additionally honors any recent LLM veto that was PRECOMPUTED out-of-band by
+    the scheduler (see app/scheduler.py::run_llm_veto_precompute, written to
+    veto_records with source="llm"). It still does NOT call the LLM in-request —
+    the strategy side calls this with a tight (~3s) timeout and fails-open on any
+    error/timeout, so a synchronous deep-tier LLM call here would always time out
+    and be dead weight. The full synchronous rule+LLM audit lives on
+    POST /audit/veto (internal / manual use).
 
     The strategy side treats the AI service as an additional safety net and
     defaults to PASS on any error or timeout — never blocks trading due to
@@ -203,6 +223,31 @@ def strategy_veto(
     )
     vetoed, reason = check_rules(signal, context)
     source = "rule" if vetoed else "rules_passed"
+
+    # If the fast rules pass, honor a recent ASYNCHRONOUSLY-precomputed LLM veto
+    # (written out-of-band by the scheduler's run_llm_veto_precompute job). This
+    # keeps the request path fast: we read a table, we never call the LLM here.
+    # Fail-open (ADR-002): any lookup error → treat as no veto (PASS).
+    decision_veto = vetoed
+    decision_reason = reason
+    if not vetoed:
+        try:
+            llm_row = latest_llm_veto(
+                db, strategy, pair, within_minutes=_veto_llm_ttl_min(),
+            )
+            if llm_row is not None and llm_row.veto:
+                decision_veto = True
+                decision_reason = llm_row.reason
+        except Exception:  # noqa: BLE001 - a DB hiccup must never break /veto
+            logger.warning(
+                "latest_llm_veto lookup failed for %s %s; failing open to PASS",
+                strategy, pair, exc_info=True,
+            )
+
+    # Persist the audit record for THIS query exactly as before — reflecting the
+    # deterministic rule outcome, source rule/rules_passed. We deliberately do
+    # NOT write a source="llm" row here (that belongs to the precompute job; a
+    # fresh llm row here would feed back into the next lookup and self-reinforce).
     insert_veto_record(
         db,
         strategy=strategy,
@@ -212,8 +257,8 @@ def strategy_veto(
         source=source,
     )
     return schemas.StrategyVetoResponse(
-        decision="VETO" if vetoed else "PASS",
-        reason=reason,
+        decision="VETO" if decision_veto else "PASS",
+        reason=decision_reason,
     )
 
 
