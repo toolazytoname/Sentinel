@@ -369,7 +369,8 @@
 
 ## RC2 — 优化（LOW，token 不够可整批交便宜模型）
 
-- [ ] **RC2.1** 🟢 收敛配置读取到 pydantic Settings + 去掉重复 local import
+- [x] **RC2.1** 🟢 收敛配置读取到 pydantic Settings + 去掉重复 local import
+  ✅ 完成于 2026-07-07，备注：新增 pydantic_settings.BaseSettings 子类 Settings（field=env var 大小写不敏感映射，默认值与原手搓 dict 完全一致，api_key/base_url 用 @property 保留 AGNES→OPENAI / LLM_BASE_URL→OPENAI_API_BASE fallback 链）；deps.py 三处 _settings()['db_url'] / _settings()['api_key'] 等改成属性访问；validate_required_secrets() 改读 Settings 字段；requirements.txt 加 pydantic-settings==2.14.2。main.py 顶部 import 加 get_reflection_by_trade_id；submit_reflection 内删除 local import。_settings() 仍为 @lru_cache 包装，reset_caches_for_testing 行为不变。全量 268 passed。
   - **文件**: `ai-service/app/deps.py`（`_settings()` 手搓 `os.environ.get`）；`ai-service/app/main.py`（`submit_reflection` 里第二次 local import `get_reflection_by_trade_id`，`trade_close` 里已 import 过）
   - **问题**: ① 配置散在 `os.environ.get`，无类型/无校验，易拼错 key（security.md 要求边界校验）。② RA.2 引入的 local import 与 `trade_close` 内的重复。
   - **修复**（小步、低风险）: ① 用 `pydantic-settings` 的 `BaseSettings` 定义一个 `Settings` 类集中声明所有环境变量（api_key/base_url/db_url/models/proxy/retention/env/webhook_secret），`_settings()` 返回它；保持默认值不变以不破坏现有测试。② 把 `get_reflection_by_trade_id` 提到 main.py 顶部 import 一次，删掉两处 local import。

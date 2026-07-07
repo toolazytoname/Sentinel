@@ -41,6 +41,7 @@ from app.deps import (
     require_api_token,
 )
 from app.db.repository import (
+    get_reflection_by_trade_id,
     get_strategy_stage,
     insert_reflection,
     insert_research_note,
@@ -337,7 +338,6 @@ def submit_reflection(
             detail=f"LLM unavailable: {e}",
         )
 
-    from app.db.repository import get_reflection_by_trade_id
     row = get_reflection_by_trade_id(db, ctx.trade_id, body.strategy)
     return schemas.ReflectionResponse(
         id=row.id if row else 0,

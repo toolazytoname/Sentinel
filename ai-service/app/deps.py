@@ -8,9 +8,10 @@ from __future__ import annotations
 import logging
 import os
 from functools import lru_cache
-from typing import Iterator
+from typing import Iterator, Optional
 
 from fastapi import Header, HTTPException, status
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.orm import Session
 
 from app.db import get_engine, get_session, insert_llm_call
@@ -27,38 +28,74 @@ from app.notifier import NotifierConfig, TelegramNotifier
 logger = logging.getLogger(__name__)
 
 
+class Settings(BaseSettings):
+    """Typed env-driven configuration (RC2.1).
+
+    Defaults match the previous hand-rolled `_settings()` dict exactly so
+    existing tests/dev setups keep working. Field names map case-insensitively
+    to env vars (e.g. `llm_quick_model` ↔ `LLM_QUICK_MODEL`).
+
+    `api_key` / `base_url` are derived from the raw key/base fields with the
+    same AGNES→OPENAI / LLM_BASE_URL→OPENAI_API_BASE fallback chains used
+    before. We expose them as @property so they aren't accidentally read as
+    their own (unset) env vars by pydantic.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=None,  # rely on process env, not a dotenv file
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # LLM API keys (raw — the `api_key` property resolves the fallback chain)
+    agnes_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+
+    # LLM endpoint / models
+    llm_base_url: Optional[str] = None
+    openai_api_base: str = "https://apihub.agnes-ai.com/v1"
+    llm_quick_model: str = "agnes-2.0-flash"
+    llm_deep_model: str = "agnes-2.0-flash"
+
+    # Network / DB
+    https_proxy: Optional[str] = None
+    database_url: str = "sqlite:///./sentinel.db"
+
+    # App
+    sentinel_env: str = "dev"
+
+    @property
+    def api_key(self) -> str:
+        return self.agnes_api_key or self.openai_api_key or "sk-fake-for-dev"
+
+    @property
+    def base_url(self) -> str:
+        return self.llm_base_url or self.openai_api_base
+
+
 @lru_cache(maxsize=1)
-def _settings() -> dict:
+def _settings() -> Settings:
     """Load configuration once. Env-driven (12-factor).
 
-    Default base_url points at agnes-ai (OpenAI-compatible). Provider-agnostic —
-    override via env to point at DeepSeek / OpenAI / OpenRouter.
+    Provider-agnostic — override via env to point at DeepSeek / OpenAI /
+    OpenRouter. Kept as an `@lru_cache` so `reset_caches_for_testing()` keeps
+    working (existing tests assume `_settings.cache_clear()` exists).
     """
-    return {
-        "api_key": os.environ.get("AGNES_API_KEY") or os.environ.get("OPENAI_API_KEY", "sk-fake-for-dev"),
-        "base_url": os.environ.get("LLM_BASE_URL") or os.environ.get("OPENAI_API_BASE", "https://apihub.agnes-ai.com/v1"),
-        "quick_model": os.environ.get("LLM_QUICK_MODEL", "agnes-2.0-flash"),
-        "deep_model": os.environ.get("LLM_DEEP_MODEL", "agnes-2.0-flash"),
-        "https_proxy": os.environ.get("HTTPS_PROXY"),
-        "db_url": os.environ.get("DATABASE_URL", "sqlite:///./sentinel.db"),
-        "env": os.environ.get("SENTINEL_ENV", "dev"),
-    }
+    return Settings()
 
 
 def validate_required_secrets() -> None:
     """Fail fast in prod if no real LLM key is configured. Called at app startup.
 
     In dev (SENTINEL_ENV unset or 'dev') the `sk-fake-for-dev` fallback in
-    `_settings()` is allowed so the service runs without a key. In prod,
+    `Settings.api_key` is allowed so the service runs without a key. In prod,
     that fallback would make every LLM call 401 while /healthz stays green —
     an invisible failure. Refuse to start instead (security.md: validate
     required secrets at startup).
     """
     s = _settings()
-    has_real_key = bool(
-        os.environ.get("AGNES_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    )
-    if s["env"] == "prod" and not has_real_key:
+    has_real_key = bool(s.agnes_api_key or s.openai_api_key)
+    if s.sentinel_env == "prod" and not has_real_key:
         raise RuntimeError(
             "SENTINEL_ENV=prod but no LLM API key set. "
             "Set AGNES_API_KEY or OPENAI_API_KEY. "
@@ -90,7 +127,7 @@ def require_api_token(
 
 def get_db() -> Iterator[Session]:
     """FastAPI dependency: yields a session, closes on exit."""
-    get_engine(_settings()["db_url"])  # initialize engine once
+    get_engine(_settings().database_url)  # initialize engine once
     session = get_session()
     try:
         yield session
@@ -102,11 +139,11 @@ def get_db() -> Iterator[Session]:
 def _llm_client() -> LLMClient:
     s = _settings()
     return OpenAICompatibleClient(
-        api_key=s["api_key"],
-        base_url=s["base_url"],
-        quick_model=s["quick_model"],
-        deep_model=s["deep_model"],
-        https_proxy=s["https_proxy"],
+        api_key=s.api_key,
+        base_url=s.base_url,
+        quick_model=s.llm_quick_model,
+        deep_model=s.llm_deep_model,
+        https_proxy=s.https_proxy,
         usage_callback=_persist_llm_usage,
     )
 
@@ -125,7 +162,7 @@ def _persist_llm_usage(
     a DB hiccup must never affect a completion result. Uses a fresh session so
     the write is independent of any request-scoped session.
     """
-    get_engine(_settings()["db_url"])  # ensure engine initialized
+    get_engine(_settings().database_url)  # ensure engine initialized
     session = get_session()
     try:
         insert_llm_call(
