@@ -122,6 +122,57 @@ def exit_signal(
     return False, "hold"
 
 
+# ---- Vectorized signal builders (pure, freqtrade-independent, testable) ----
+#
+# These are the vectorized equivalents of applying entry_signal / the
+# populate_exit_trend loop to each row. They live at module level so they can
+# be imported and equivalence-tested WITHOUT freqtrade installed. The
+# freqtrade adapter's populate_* methods simply delegate to these.
+#
+# Vectorization uses only current/prior bars (golden_cross / death_cross are
+# built from .shift(1) inside compute_indicators) — no future leakage.
+
+def build_entry_signals(df: pd.DataFrame, params: StrategyParams) -> pd.Series:
+    """Vectorized equivalent of applying `entry_signal` to every row.
+
+    Returns an int Series (1 = enter long, 0 = skip) aligned to ``df.index``.
+    NaN indicators (warmup) yield 0, matching entry_signal's ``pd.isna`` guards.
+    """
+    # Guard: all three indicators must be present (mirrors the pd.isna check).
+    valid = df["adx"].notna() & df["ema_fast"].notna() & df["ema_slow"].notna()
+    # golden_cross is built from boolean ops in compute_indicators (no NaN),
+    # but fillna(False) keeps this robust if a NaN ever appears.
+    golden = df["golden_cross"].fillna(False).astype(bool)
+    # NaN comparisons evaluate to False, so warmup rows are already excluded;
+    # `valid` makes the intent explicit and pins us to the loop's behavior.
+    ema_above = df["ema_fast"] > df["ema_slow"]
+    adx_ok = df["adx"] > params.adx_entry_threshold
+    signal = valid & golden & ema_above & adx_ok
+    return signal.astype(int)
+
+
+def build_exit_signals(df: pd.DataFrame, params: StrategyParams) -> pd.Series:
+    """Vectorized equivalent of the CURRENT `populate_exit_trend` loop.
+
+    Emits ONLY the signal-based exits that populate_exit_trend emits:
+      - death cross: ema_fast < ema_slow AND death_cross flag set
+      - adx collapse: adx < adx_exit_threshold
+    Hard stop / trailing stop are intentionally NOT here (they live in
+    custom_stoploss), matching the loop exactly.
+
+    Returns an int Series (1 = exit, 0 = hold) aligned to ``df.index``.
+    """
+    ema_valid = df["ema_fast"].notna() & df["ema_slow"].notna()
+    ema_below = df["ema_fast"] < df["ema_slow"]
+    death = df["death_cross"].fillna(False).astype(bool) if "death_cross" in df else False
+    death_exit = ema_valid & ema_below & death
+
+    adx_collapse = df["adx"].notna() & (df["adx"] < params.adx_exit_threshold)
+
+    signal = death_exit | adx_collapse
+    return signal.astype(int)
+
+
 # ---- freqtrade adapter (only loads when freqtrade IStrategy is available) ----
 
 try:
@@ -152,30 +203,21 @@ try:
             return compute_indicators(dataframe, params)
 
         def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-            # freqtrade expects a 'enter_long' column (1 to enter, 0 to skip)
+            # freqtrade expects a 'enter_long' column (1 to enter, 0 to skip).
+            # Delegates to the vectorized builder (equivalence-tested vs entry_signal).
             params = StrategyParams(adx_entry_threshold=float(self.adx_entry.value))
-            dataframe["enter_long"] = 0
-            for i in range(len(dataframe)):
-                if entry_signal(dataframe.iloc[i], params):
-                    dataframe.iat[i, dataframe.columns.get_loc("enter_long")] = 1
+            dataframe["enter_long"] = build_entry_signals(dataframe, params)
             return dataframe
 
         def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+            # Signal-based exits only (death_cross + adx_collapse); hard/trailing
+            # stops live in custom_stoploss. Delegates to the vectorized builder.
             params = StrategyParams(
                 adx_exit_threshold=float(self.adx_exit.value),
                 hard_stop_pct=float(self.hard_stop.value),
                 trailing_stop_pct=float(self.trailing_stop_pct.value),
             )
-            dataframe["exit_long"] = 0
-            for i in range(len(dataframe)):
-                row = dataframe.iloc[i]
-                # Track peak/trough at decision time (freqtrade does its own custom_stoploss)
-                # Here we only emit signal-based exits; hard stop/trailing live in custom_stoploss
-                if pd.notna(row.get("ema_fast")) and pd.notna(row.get("ema_slow")):
-                    if row["ema_fast"] < row["ema_slow"] and row.get("death_cross", False):
-                        dataframe.iat[i, dataframe.columns.get_loc("exit_long")] = 1
-                if pd.notna(row["adx"]) and row["adx"] < params.adx_exit_threshold:
-                    dataframe.iat[i, dataframe.columns.get_loc("exit_long")] = 1
+            dataframe["exit_long"] = build_exit_signals(dataframe, params)
             return dataframe
 
         def custom_stoploss(self, *args, **kwargs) -> float:

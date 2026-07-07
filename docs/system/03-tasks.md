@@ -198,7 +198,8 @@
   - **验证**: `python -m pytest -q` 末尾打印覆盖率且 ≥80% 才通过。
   - **DoD**: 覆盖率门槛生效且达标。
 
-- [ ] **RC.3** 消除策略里的逐行 Python 循环（反模式 + 潜在 lookahead 风险）
+- [x] **RC.3** 消除策略里的逐行 Python 循环（反模式 + 潜在 lookahead 风险）
+  🔶 **完成（2026-07-07）**：S1 抽出模块级纯向量化函数 `build_entry_signals`/`build_exit_signals`（类外可测），`populate_*` 改为委托；等价性测试钉死「向量化 == 已测 `entry_signal` 逐行 + 复刻原 populate_exit_trend」并覆盖 warmup/NaN 边界。**S2 无需改**（本就无逐行循环，是横截面轮动纯函数）。全量 241 passed, 2 skipped（freqtrade 未装的类级用例）。**剩余人工闸**：`freqtrade lookahead-analysis` 本机跑不了——等价性已证明向量化未改行为，但上线前仍需手动跑一次 lookahead-analysis（04-handoff 常见坑#2）。
   - **文件**: `strategies/s1_trend_follow/strategy.py`（`populate_entry_trend` 约第 158 行、`populate_exit_trend` 约第 170 行）；`s2_momentum_rotation` 同类问题一并查。
   - **问题**: 用 `for i in range(len(dataframe))` + `dataframe.iat[...]` 逐行写信号列，是 pandas 反模式：慢，且逐行改易引入未来函数（lookahead）。设计文档要求策略过 `lookahead-analysis`。
   - **修复方向**: 用**向量化**布尔运算生成整列信号。例如入场：
