@@ -399,3 +399,117 @@ def test_reflection_submit_returns_real_primary_key():
         body = resp.json()
         assert body["trade_id"] == "t1"
         assert body["id"] > 0, "reflection id must be the real DB primary key"
+
+
+# --- RS.3: optional X-Sentinel-Token gate on OPS write endpoints ---
+
+
+def test_ops_endpoint_rejects_missing_token_when_configured(monkeypatch):
+    """With SENTINEL_API_TOKEN set, /strategy/check without header → 401."""
+    monkeypatch.setenv("SENTINEL_API_TOKEN", "s3cret-token")
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.post(
+            "/strategy/check",
+            json={"strategy": "S1", "observed_drawdown_pct": 5.0, "trade_count": 10},
+        )
+        assert resp.status_code == 401
+
+
+def test_ops_endpoint_rejects_wrong_token_when_configured(monkeypatch):
+    """With SENTINEL_API_TOKEN set, a wrong X-Sentinel-Token → 401."""
+    monkeypatch.setenv("SENTINEL_API_TOKEN", "s3cret-token")
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.post(
+            "/strategy/check",
+            json={"strategy": "S1", "observed_drawdown_pct": 5.0, "trade_count": 10},
+            headers={"X-Sentinel-Token": "wrong"},
+        )
+        assert resp.status_code == 401
+
+
+def test_ops_endpoint_accepts_correct_token(monkeypatch):
+    """With SENTINEL_API_TOKEN set, the matching header passes the gate."""
+    monkeypatch.setenv("SENTINEL_API_TOKEN", "s3cret-token")
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        client.post(
+            "/strategy/register",
+            json={"strategy": "S1TrendFollow", "initial_stage": "dry_run"},
+            headers={"X-Sentinel-Token": "s3cret-token"},
+        )
+        resp = client.post(
+            "/strategy/check",
+            json={"strategy": "S1TrendFollow", "observed_drawdown_pct": 5.0, "trade_count": 10},
+            headers={"X-Sentinel-Token": "s3cret-token"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["current_stage"] == "dry_run"
+
+
+def test_ops_endpoint_open_when_token_unset(monkeypatch):
+    """With SENTINEL_API_TOKEN unset (dev), OPS endpoints work without header."""
+    monkeypatch.delenv("SENTINEL_API_TOKEN", raising=False)
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.post(
+            "/research/note",
+            json={
+                "asset": "BTC",
+                "event_type": "regulatory",
+                "severity": 4,
+                "summary": "SEC delays spot BTC ETF approval by 30 days",
+                "source_url": "https://example.com/etf",
+                "published_at": "2026-07-06T08:00:00Z",
+            },
+        )
+        assert resp.status_code == 201
+
+
+def test_veto_not_gated_even_when_token_set(monkeypatch):
+    """RS.3 red-line: /veto must NOT require a token (called by local freqtrade)."""
+    monkeypatch.setenv("SENTINEL_API_TOKEN", "s3cret-token")
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        assert resp.json()["decision"] == "PASS"
+
+
+def test_trade_close_not_gated_even_when_token_set(monkeypatch):
+    """RS.3 red-line: /trade-close must NOT require a token (freqtrade webhook)."""
+    monkeypatch.setenv("SENTINEL_API_TOKEN", "s3cret-token")
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.post(
+            "/trade-close",
+            json={
+                "trade_id": 42,
+                "strategy": "S1TrendFollow",
+                "pair": "BTC/USDT",
+                "side": "long",
+                "direction": "long",
+                "open_rate": 100.0,
+                "close_rate": 110.0,
+                "profit_ratio": 0.10,
+                "profit_amount": 10.0,
+                "stake_amount": 100.0,
+                "stake_currency": "USDT",
+                "open_date": "2026-07-06T00:00:00Z",
+                "close_date": "2026-07-06T06:00:00Z",
+                "enter_tag": "adx",
+                "exit_reason": "roi",
+                "is_final_exit": True,
+                "sub_trade": False,
+            },
+        )
+        # Must not be 401 — the gate does not apply. Reflection succeeds → 200.
+        assert resp.status_code != 401
+        assert resp.status_code == 200

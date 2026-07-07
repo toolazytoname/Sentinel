@@ -40,6 +40,7 @@ from app.deps import (
     get_reflection_extractor,
     get_research_extractor,
     get_veto_extractor,
+    require_api_token,
 )
 from app.db.repository import (
     get_strategy_stage,
@@ -222,6 +223,7 @@ def strategy_veto(
     "/research/note",
     response_model=schemas.ResearchResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_api_token)],
 )
 def submit_research_note(
     body: schemas.ResearchRequest,
@@ -255,6 +257,7 @@ def submit_research_note(
     "/reflection",
     response_model=schemas.ReflectionResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_api_token)],
 )
 def submit_reflection(
     body: schemas.ReflectionRequest,
@@ -302,7 +305,11 @@ def submit_reflection(
 
 # --- Stages ---
 
-@app.post("/strategy/register", status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/strategy/register",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_api_token)],
+)
 def strategy_register(body: schemas.StageRegisterRequest, db: Session = Depends(get_db)):
     register_strategy(
         db,
@@ -313,7 +320,11 @@ def strategy_register(body: schemas.StageRegisterRequest, db: Session = Depends(
     return {"status": "registered", "strategy": body.strategy, "stage": body.initial_stage}
 
 
-@app.post("/strategy/check", response_model=schemas.StageReportResponse)
+@app.post(
+    "/strategy/check",
+    response_model=schemas.StageReportResponse,
+    dependencies=[Depends(require_api_token)],
+)
 def strategy_check(body: schemas.StageCheckRequest, db: Session = Depends(get_db)):
     report = check_stage_upgrade(
         db,

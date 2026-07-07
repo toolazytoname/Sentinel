@@ -161,7 +161,48 @@ lsof -iTCP:8080 -sTCP:LISTEN
 # 杀掉占用进程，或改 docker-compose.yml 的 ports 映射（左边的 8080）
 ```
 
-## 9. 下一步（明早任务清单）
+## 9. 端口暴露与防火墙加固（RS.3）
+
+**核心风险**：VPS 上防火墙配错，ai-service (8000) 或 FreqUI (8080) 被公网直接访问。
+
+- **ai-service (8000)** 与 **FreqUI (8080)** 绝不能对公网可达，只允许本机（loopback）与你的管理 IP 访问。
+- 本项目用 `network_mode: host`，此时 compose 里的 `ports:` 映射**无效**——容器直接共享宿主网络栈，真正决定可达性的是**进程的绑定地址**：
+  - ai-service 通过 `scripts/start.sh` 绑定 `${AI_SERVICE_HOST:-127.0.0.1}`（默认 loopback），已避免 `0.0.0.0`。
+  - FreqUI 监听 8080，同样应确认其 `api_server.listen_ip_address` 为 `127.0.0.1`（或用下面的防火墙兜底）。
+- **端点保护分层**：
+  - `/veto` 与 `/trade-close` **故意不加令牌**——由本机 freqtrade/策略调用，无法发自定义头，仅靠此处的网络隔离（loopback 绑定 + 防火墙）保护。
+  - OPS 写端点 `/strategy/register`、`/strategy/check`、`/research/note`、`/reflection` 在设置了 `SENTINEL_API_TOKEN` 后**额外**要求请求头 `X-Sentinel-Token`，不匹配返回 401（见 `.env.example`）。
+
+### 9.1 ufw 兜底示例
+
+即使进程已绑定 loopback，也建议加一层防火墙纵深防御。允许 SSH，拒绝公网访问 8000/8080，只放行本机与管理 IP：
+
+```bash
+# 默认策略：拒绝入站、允许出站
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# 放行 SSH（否则会把自己锁在门外！先确认端口，默认 22）
+sudo ufw allow 22/tcp
+
+# 8000 / 8080 只允许本机回环（host 网络下本机组件间通信）
+sudo ufw allow from 127.0.0.1 to any port 8000 proto tcp
+sudo ufw allow from 127.0.0.1 to any port 8080 proto tcp
+
+# 如需从管理机远程访问 FreqUI/ai-service，只放行你的固定 IP（替换 A.B.C.D）
+sudo ufw allow from A.B.C.D to any port 8080 proto tcp
+
+# 其余入站到 8000/8080 一律拒绝（默认 deny incoming 已覆盖，此处显式声明更直观）
+sudo ufw deny 8000/tcp
+sudo ufw deny 8080/tcp
+
+sudo ufw enable
+sudo ufw status verbose
+```
+
+> 提示：`ufw allow from 127.0.0.1` 对某些内核/回环流量并非必需（本机 loopback 通常不过 INPUT 链的公网规则），但显式声明可读性更好，也避免个别配置下误伤。真正兜底的是「默认 deny incoming + 只放行 SSH 与管理 IP」。
+
+## 10. 下一步（明早任务清单）
 
 激活 Telegram 后，对照 `docs/system/03-tasks.md` 进入 P1：
 - P1.1 下载历史数据（命令见 4 节）

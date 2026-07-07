@@ -303,7 +303,8 @@
   - **验证/加测**: 加测试：`SENTINEL_ENV=prod` 且无 key → 构造 app/调用配置校验函数抛预期异常；dev 无 key → 不抛。注意用 `reset_caches_for_testing()` 清 lru_cache。
   - **DoD**: prod 缺 key 直接启动失败并给清晰信息；dev 不受影响；测试覆盖两条路径。
 
-- [ ] **RS.3** 🧠 部署加固：host 网络模式下 8000 端口的无鉴权端点暴露面
+- [x] **RS.3** 🧠 部署加固：host 网络模式下 8000 端口的无鉴权端点暴露面
+  ✅ 完成于 2026-07-07，备注：① 运维写端点（`/strategy/register`、`/strategy/check`、`/research/note`、`/reflection`）加可选 `X-Sentinel-Token` 校验（`SENTINEL_API_TOKEN` 未配=dev 放行，配了则不匹配 401）；`/veto`、`/trade-close` **不 gate**（freqtrade/策略无法带自定义头，靠网络隔离）。② 确认 uvicorn 已绑 `${AI_SERVICE_HOST:-127.0.0.1}` loopback。③ RUNBOOK 新增「端口暴露与防火墙加固」章节（ufw 示例 + 为何两端点免 token）。新增 6 用例（含"配 token 时 /veto、/trade-close 仍 200"红线）。全量 233 passed。
   - **文件**: `deploy/docker-compose.yml`（ai-service 用 `network_mode: host`，监听 `127.0.0.1:8000`）；`deploy/RUNBOOK.md`
   - **问题**: `/veto`、`/telegram/webhook`、`/strategy/*`、`/trade-close` 均无鉴权（设计上靠「只在本机被 freqtrade 调用」）。一旦 VPS 上服务监听到 `0.0.0.0` 或防火墙没关 8000，这些端点直接对公网开放（能读策略阶段、刷 veto、伪造 trade-close 造假复盘）。
   - **修复方向**（动手前写方案，二选一或组合）:

@@ -10,6 +10,7 @@ import os
 from functools import lru_cache
 from typing import Iterator
 
+from fastapi import Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_engine, get_session, insert_llm_call
@@ -62,6 +63,28 @@ def validate_required_secrets() -> None:
             "SENTINEL_ENV=prod but no LLM API key set. "
             "Set AGNES_API_KEY or OPENAI_API_KEY. "
             "Refusing to start with a fake key."
+        )
+
+
+def require_api_token(
+    x_sentinel_token: str | None = Header(default=None),
+) -> None:
+    """Optional shared-token guard for OPS-facing write endpoints (RS.3).
+
+    When `SENTINEL_API_TOKEN` is set (production/VPS), callers of the gated
+    routes (`/strategy/register`, `/strategy/check`, `/research/note`,
+    `/reflection`) must send a matching `X-Sentinel-Token` header. When the
+    env var is unset (dev/tests), this is a no-op so local flows keep working.
+
+    NOTE: `/veto` and `/trade-close` are intentionally NOT gated — they are
+    called by freqtrade/strategy code which cannot send custom headers and
+    rely on loopback bind + firewall network isolation instead.
+    """
+    expected = os.environ.get("SENTINEL_API_TOKEN")
+    if expected and x_sentinel_token != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing X-Sentinel-Token",
         )
 
 
