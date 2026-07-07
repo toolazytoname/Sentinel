@@ -18,13 +18,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
 from app.llm.client import LLMClient, LLMUnavailable
 
 logger = logging.getLogger(__name__)
+
+# Callback invoked (best-effort) after each successful completion with token
+# usage. Signature: (model, model_tier, prompt_tokens, completion_tokens,
+# total_tokens) -> None. Wired to a DB write in deps; the client never depends
+# on the DB directly.
+UsageCallback = Callable[..., None]
 
 
 class OpenAICompatibleClient(LLMClient):
@@ -39,6 +45,7 @@ class OpenAICompatibleClient(LLMClient):
         deep_model: str = "gpt-4o",
         timeout: float = 30.0,
         https_proxy: str | None = None,
+        usage_callback: UsageCallback | None = None,
     ):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
@@ -50,6 +57,7 @@ class OpenAICompatibleClient(LLMClient):
         }
         self._timeout = timeout
         self._proxy = https_proxy
+        self._usage_callback = usage_callback
 
     def _make_client(self) -> httpx.Client:
         """Return a fresh sync httpx.Client. Caller closes."""
@@ -88,6 +96,29 @@ class OpenAICompatibleClient(LLMClient):
 
     # --- internal ---
 
+    def _log_usage(self, body: dict, model: str, model_tier: str) -> None:
+        """Best-effort: forward token usage to the callback. Never raises.
+
+        Logging must NEVER break or slow-fail the LLM call, so any callback
+        failure is swallowed with a warning. If the response carries no `usage`
+        block, we skip logging entirely.
+        """
+        if self._usage_callback is None:
+            return
+        usage = _extract_usage(body)
+        if usage is None:
+            return
+        try:
+            self._usage_callback(
+                model=model,
+                model_tier=model_tier,
+                prompt_tokens=usage["prompt_tokens"],
+                completion_tokens=usage["completion_tokens"],
+                total_tokens=usage["total_tokens"],
+            )
+        except Exception as exc:  # noqa: BLE001 - logging must never break the call
+            logger.warning("usage_callback failed (ignored): %s", exc)
+
     def _build_payload(self, prompt: str, model_tier: str) -> tuple[str, dict[str, Any]]:
         model = self._quick_model if model_tier == "quick" else self._deep_model
         url = f"{self._base_url}/chat/completions"
@@ -121,7 +152,9 @@ class OpenAICompatibleClient(LLMClient):
                             f"Non-retryable client error {resp.status_code}: {resp.text[:200]}"
                         )
                     resp.raise_for_status()  # any other non-2xx
-                    return _extract_text(resp.json())
+                    body = resp.json()
+                    self._log_usage(body, payload["model"], model_tier)
+                    return _extract_text(body)
             except (httpx.HTTPError, json.JSONDecodeError, KeyError) as e:
                 last_error = e
                 logger.warning("LLM call error (attempt %d/%d): %s", attempt + 1, attempts, e)
@@ -149,7 +182,9 @@ class OpenAICompatibleClient(LLMClient):
                             f"Non-retryable client error {resp.status_code}: {resp.text[:200]}"
                         )
                     resp.raise_for_status()
-                    return _extract_text(resp.json())
+                    body = resp.json()
+                    self._log_usage(body, payload["model"], model_tier)
+                    return _extract_text(body)
                 except (httpx.HTTPError, json.JSONDecodeError, KeyError) as e:
                     last_error = e
                     logger.warning("LLM call error (attempt %d/%d): %s", attempt + 1, attempts, e)
@@ -167,3 +202,19 @@ def _extract_text(body: dict) -> str:
         return body["choices"][0]["message"]["content"]
     except (KeyError, IndexError) as e:
         raise LLMUnavailable(f"Malformed completion response: {e}") from e
+
+
+def _extract_usage(body: dict) -> dict[str, int] | None:
+    """Return normalized token counts from a response's `usage` block.
+
+    Returns None when `usage` is absent (older/minimal providers) so callers
+    skip logging rather than crash. Missing individual keys default to 0.
+    """
+    usage = body.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return {
+        "prompt_tokens": usage.get("prompt_tokens", 0) or 0,
+        "completion_tokens": usage.get("completion_tokens", 0) or 0,
+        "total_tokens": usage.get("total_tokens", 0) or 0,
+    }

@@ -82,6 +82,24 @@ class VetoRecordRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class LlmCallRow(Base):
+    """Token-usage audit trail: one row per successful LLM chat completion.
+
+    Fulfills design P2.2 DoD — lets cost/token consumption be audited. Written
+    best-effort via a usage callback (see llm/openai_compat.py); a logging
+    failure must never affect the completion result.
+    """
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_tier: Mapped[str] = mapped_column(String(16), nullable=False)  # "quick"|"deep"
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class StrategyStageRow(Base):
     """Tracks which stage of the ADR-005 state machine each strategy is in.
 

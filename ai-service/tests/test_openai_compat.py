@@ -171,6 +171,65 @@ class TestAsyncComplete:
         assert len(state["calls"]) == 2
 
 
+class TestUsageCallback:
+    """RB2.4 — token usage is forwarded via a callback (no DB coupling)."""
+
+    def test_callback_receives_token_usage(self):
+        received: list[dict] = []
+        responder, _ = _make_responder([httpx.Response(200, json=_ok_response("hi"))])
+        client = _build_client_with_transport(httpx.MockTransport(responder))
+        client._usage_callback = lambda **kw: received.append(kw)
+
+        result = client.complete("p", model_tier="deep")
+
+        assert result == "hi"
+        assert len(received) == 1
+        call = received[0]
+        assert call["model"] == "gpt-4o"  # deep tier model
+        assert call["model_tier"] == "deep"
+        assert call["prompt_tokens"] == 10
+        assert call["completion_tokens"] == 20
+        assert call["total_tokens"] == 30
+
+    def test_callback_skipped_when_usage_missing(self):
+        received: list[dict] = []
+        body = _ok_response("no usage here")
+        del body["usage"]
+        responder, _ = _make_responder([httpx.Response(200, json=body)])
+        client = _build_client_with_transport(httpx.MockTransport(responder))
+        client._usage_callback = lambda **kw: received.append(kw)
+
+        result = client.complete("p")
+
+        assert result == "no usage here"
+        assert received == []  # no usage block → callback not invoked
+
+    def test_raising_callback_does_not_break_complete(self):
+        def boom(**_kw):
+            raise RuntimeError("db is on fire")
+
+        responder, _ = _make_responder([httpx.Response(200, json=_ok_response("still ok"))])
+        client = _build_client_with_transport(httpx.MockTransport(responder))
+        client._usage_callback = boom
+
+        # Logging must NEVER break the completion — text still returned.
+        result = client.complete("p")
+        assert result == "still ok"
+
+    def test_async_callback_receives_token_usage(self):
+        received: list[dict] = []
+        responder, _ = _make_responder([httpx.Response(200, json=_ok_response("async hi"))])
+        client = _build_client_with_transport(httpx.MockTransport(responder))
+        client._usage_callback = lambda **kw: received.append(kw)
+
+        result = asyncio.run(client.acomplete("p"))
+
+        assert result == "async hi"
+        assert len(received) == 1
+        assert received[0]["total_tokens"] == 30
+        assert received[0]["model_tier"] == "quick"
+
+
 class TestIntegrationWithStructuredExtractor:
     """End-to-end: real LLMClient → StructuredExtractor → Pydantic schema."""
 

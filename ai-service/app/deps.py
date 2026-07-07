@@ -5,13 +5,14 @@ All routes use Depends() to pull these in — no global state in request handler
 """
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from typing import Iterator
 
 from sqlalchemy.orm import Session
 
-from app.db import get_engine, get_session
+from app.db import get_engine, get_session, insert_llm_call
 from app.llm import (
     LLMClient,
     OpenAICompatibleClient,
@@ -21,6 +22,8 @@ from app.llm import (
     VetoExtractor,
 )
 from app.notifier import NotifierConfig, TelegramNotifier
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -81,7 +84,39 @@ def _llm_client() -> LLMClient:
         quick_model=s["quick_model"],
         deep_model=s["deep_model"],
         https_proxy=s["https_proxy"],
+        usage_callback=_persist_llm_usage,
     )
+
+
+def _persist_llm_usage(
+    *,
+    model: str,
+    model_tier: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+) -> None:
+    """Persist one LLM call's token usage (P2.2 DoD). Best-effort.
+
+    The client already wraps this in try/except, but we stay defensive here too:
+    a DB hiccup must never affect a completion result. Uses a fresh session so
+    the write is independent of any request-scoped session.
+    """
+    get_engine(_settings()["db_url"])  # ensure engine initialized
+    session = get_session()
+    try:
+        insert_llm_call(
+            session,
+            model=model,
+            model_tier=model_tier,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001 - logging must never break the call
+        logger.warning("failed to persist llm_calls row (ignored): %s", exc)
+    finally:
+        session.close()
 
 
 def get_llm_client() -> LLMClient:

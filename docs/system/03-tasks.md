@@ -338,7 +338,8 @@
   - **验证**: `python -m pytest ai-service/tests/test_api.py -q` 全绿；运行时无 utcnow 的 DeprecationWarning。
   - **DoD**: 无 `datetime.utcnow()`；复盘响应 created_at 来自真实行；测试绿。
 
-- [ ] **RB2.4** 🟡 LLM 每次调用的 token/成本从不落库（P2.2 的 DoD 未达成）
+- [x] **RB2.4** 🟡 LLM 每次调用的 token/成本从不落库（P2.2 的 DoD 未达成）
+  ✅ 完成于 2026-07-07，备注：新增 `llm_calls` 表（经 ensure_schema 建）+ `insert_llm_call`；`OpenAICompatibleClient` 加可选 `usage_callback`（解析一次 json 同时取 text 与 usage，缺 usage 不崩、回调异常不影响 completion），deps `_llm_client` 接线用新 session 写库。分层清晰：客户端零 DB 依赖。新增 5 用例（含"回调抛异常不破坏 complete"）。全量 227 passed。
   - **文件**: `ai-service/app/llm/openai_compat.py`（`_extract_text` 丢弃了响应里的 `usage`）；需新增一张表/或复用日志
   - **问题**: 设计 P2.2 明确要求「每次调用的 token 消耗落库可查」，当前 OpenAI 兼容响应里的 `usage.prompt_tokens/completion_tokens` 被直接丢弃，无法核算成本。
   - **修复方向**（先做方案，注意这涉及新表 = schema 变更，**要和 RB.4 Alembic 协调**，别用裸 `create_all` 加表后又忘了迁移）:

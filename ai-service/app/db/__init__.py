@@ -1,5 +1,6 @@
 from .models import (
     Base,
+    LlmCallRow,
     ReflectionRow,
     ResearchNoteRow,
     StrategyStageRow,
@@ -10,6 +11,7 @@ from .models import (
 from .repository import (
     STAGES,
     all_strategy_stages,
+    insert_llm_call,
     insert_reflection,
     insert_research_note,
     insert_veto_record,
@@ -22,6 +24,7 @@ from .repository import (
 
 __all__ = [
     "Base",
+    "LlmCallRow",
     "ReflectionRow",
     "ResearchNoteRow",
     "StrategyStageRow",
@@ -30,6 +33,7 @@ __all__ = [
     "get_session",
     "STAGES",
     "all_strategy_stages",
+    "insert_llm_call",
     "insert_reflection",
     "insert_research_note",
     "insert_veto_record",

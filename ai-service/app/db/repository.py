@@ -12,6 +12,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    LlmCallRow,
     ReflectionRow,
     ResearchNoteRow,
     StrategyStageRow,
@@ -149,6 +150,30 @@ def recent_vetoes(session: Session, since_hours: int = 24) -> Sequence[VetoRecor
         .order_by(desc(VetoRecordRow.created_at))
     )
     return session.execute(stmt).scalars().all()
+
+
+# --- LLM call token usage (P2.2 DoD) ---
+
+def insert_llm_call(
+    session: Session,
+    *,
+    model: str,
+    model_tier: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+) -> LlmCallRow:
+    row = LlmCallRow(
+        model=model,
+        model_tier=model_tier,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return row
 
 
 # --- Strategy stages (ADR-005) ---

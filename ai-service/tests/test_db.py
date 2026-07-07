@@ -15,6 +15,7 @@ from app.db.repository import (
     STAGES,
     all_strategy_stages,
     get_strategy_stage,
+    insert_llm_call,
     insert_reflection,
     insert_research_note,
     insert_veto_record,
@@ -110,6 +111,32 @@ class TestVetoRecords:
         assert len(rows) == 1
         assert rows[0].strategy == "S1TrendFollow"
         assert rows[0].veto is True
+
+
+class TestLlmCalls:
+    """RB2.4 — token-usage audit rows (P2.2 DoD)."""
+
+    def test_insert_and_retrieve(self, session):
+        from app.db.models import LlmCallRow
+
+        row = insert_llm_call(
+            session,
+            model="agnes-2.0-flash",
+            model_tier="quick",
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+        )
+        assert row.id is not None
+
+        fetched = session.get(LlmCallRow, row.id)
+        assert fetched is not None
+        assert fetched.model == "agnes-2.0-flash"
+        assert fetched.model_tier == "quick"
+        assert fetched.prompt_tokens == 10
+        assert fetched.completion_tokens == 20
+        assert fetched.total_tokens == 30
+        assert fetched.created_at is not None
 
 
 class TestStrategyStages:
