@@ -186,7 +186,8 @@
   - **DoD**: 存在自动机制（测试或生成脚本）能拦截漂移；`python -m pytest strategies -q` 绿。
   - 关联记忆: `strategy-base-duplication`、`veto-endpoint-contract`。
 
-- [ ] **RC.2** 接入测试覆盖率门槛（testing.md 要求 ≥80%，当前没测量）
+- [x] **RC.2** 接入测试覆盖率门槛（testing.md 要求 ≥80%，当前没测量）
+  ✅ 完成于 2026-07-07，备注：requirements.txt 加 pytest-cov==7.1.0（顺便带 coverage==7.15.0）；pytest.ini addopts 改 `-v --tb=short --cov=ai-service/app --cov=strategies --cov-report=term-missing --cov-fail-under=80`。**实测总覆盖率 91.74%**（远高于 80% 门槛，无需调整阈值）；74 个文件中只有 4 个低于 80%：strategies/base.py 73%（veto 串行/并行分支 + AI 不可达降级）、strategies/s1_trend_follow/strategy.py 70%（populate_* 适配器层）、s2_momentum_rotation/strategy.py 72%（同前）、deps.py 80%（lifespan 与 reset 辅助）；这些是 freqtrade 内联调用框架层，freqtrade 容器外单测难直接覆盖。274 passed, 2 skipped。
   - **文件**: `pytest.ini`、`ai-service/requirements.txt`
   - **问题**: `pytest.ini` 的 `addopts` 只有 `-v --tb=short`，没有 `--cov`，覆盖率从未被测量或强制。
   - **修复**:

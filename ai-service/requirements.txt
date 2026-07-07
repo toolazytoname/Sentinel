@@ -7,3 +7,4 @@ pydantic-settings==2.14.2
 SQLAlchemy==2.0.51
 httpx==0.28.1
 APScheduler==3.10.4
+pytest-cov==7.0.0
