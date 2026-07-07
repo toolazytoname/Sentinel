@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import os
@@ -349,7 +349,7 @@ def submit_reflection(
         what_failed=reflection.what_failed,
         lesson=reflection.lesson,
         confidence=reflection.confidence,
-        created_at=datetime.utcnow(),
+        created_at=row.created_at if row else datetime.now(timezone.utc),
     )
 
 

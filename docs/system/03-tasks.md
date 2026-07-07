@@ -334,7 +334,8 @@
   - **验证/加测**: 插 100/91 天前的旧记录 + 几条新记录 → 调清理 → 断言只剩新记录。
   - **DoD**: 有可配置保留期的定时清理 + 测试；默认 90 天。
 
-- [ ] **RB2.3** 🟢 修 `datetime.utcnow()` 弃用用法 + 复盘响应用真实时间戳
+- [x] **RB2.3** 🟢 修 `datetime.utcnow()` 弃用用法 + 复盘响应用真实时间戳
+  ✅ 完成于 2026-07-07，备注：main.py:25 加 timezone import；main.py:352 `created_at=row.created_at if row else datetime.now(timezone.utc)`（用 RA.2 已查的真实行）；全仓 grep 仅剩 `_utcnow()` 函数名 + 注释。268 passed, 1 warning（无关 Starlette 弃用）。
   - **文件**: `ai-service/app/main.py` 第 285 行 `created_at=datetime.utcnow(),`（在 `submit_reflection` 里）
   - **问题**: ① `datetime.utcnow()` 在 Python 3.12+ 已弃用（本仓 venv 是 3.14），会有 DeprecationWarning，且返回 naive 时间。② 该处**伪造**了一个当前时间当 created_at 返回，而 RA.2 已经重新查到了真实 `row`，应直接用 `row.created_at`。
   - **修复**: 把 `created_at=datetime.utcnow(),` 改成 `created_at=row.created_at if row else datetime.now(timezone.utc),`（`row` 变量来自 RA.2 已加的重新查库；确认文件顶部或函数内有 `from datetime import timezone`，没有就补 import）。顺带全仓 `grep -rn "utcnow()" ai-service strategies` 确认再无其它弃用点。
