@@ -223,7 +223,8 @@
     - 补一段「如何本地跑起来」：`cd deploy && cp .env.example .env`（填密钥）→ `docker compose up -d` → FreqUI `http://localhost:8080` / AI 服务 `http://localhost:8000/healthz`；本地测试 `source .venv/bin/activate && python -m pytest -q`。
   - **DoD**: README 状态与实际一致，含可照做的启动步骤。
 
-- [ ] **RC.5** 清理死 import 与小噪音
+- [x] **RC.5** 清理死 import 与小噪音
+  ✅ 完成于 2026-07-07，备注：删 `Optional`（typing）、`LLMClient`（app.llm）、`get_research_extractor`（app.deps）3 个未引用 import，逐个删除 + 跑 test_api.py 兜底。Header/ResearchExtractor/get_strategy_stage 均有用，保留。全量 268 passed。
   - **文件**: `ai-service/app/main.py`
   - **问题**: 顶部 import 了 `get_research_extractor`、`get_strategy_stage`、`Optional`、`ResearchExtractor` 等但函数体未用（`submit_research_note` 根本不调 LLM）。属噪音，易误导。
   - **修复**: 逐个确认未被引用后删除。**删一个跑一次 `python -m pytest ai-service/tests/test_api.py -q`**，防止删错。

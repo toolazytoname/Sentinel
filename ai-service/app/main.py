@@ -23,7 +23,6 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
 
 import os
 
@@ -38,7 +37,6 @@ from app.deps import (
     get_llm_client,
     get_notifier,
     get_reflection_extractor,
-    get_research_extractor,
     get_veto_extractor,
     require_api_token,
 )
@@ -50,7 +48,7 @@ from app.db.repository import (
     latest_llm_veto,
     recent_high_severity_assets,
 )
-from app.llm import LLMClient, LLMUnavailable
+from app.llm import LLMUnavailable
 from app.llm import ReflectionExtractor, ResearchExtractor, VetoExtractor
 from app.modules.reflection import ReflectionWriter, TradeContext
 from app.modules.stages import (
