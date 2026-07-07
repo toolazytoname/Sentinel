@@ -22,12 +22,13 @@ services:
     # 加载 .env 文件，把变量注入到 freqtrade 容器（freqtrade 通过 FREQTELEGRAM__TELEGRAM_TOKEN 等环境变量读取）
     env_file:
       - .env
-    # 代理环境变量：让 aiohttp（freqtrade 异步 HTTP 客户端）走本地 ClashX 代理访问交易所
+    # 代理环境变量：从 .env 注入 HTTPS_PROXY（国内本机填 http://127.0.0.1:7890，VPS 留空）
+    # 默认留空 = 不走代理。HTTPS_PROXY 同时设置大小写两份覆盖容器内 Python aiohttp/httpx 的各种读取路径。
     environment:
-      HTTP_PROXY: "http://127.0.0.1:7890"
-      HTTPS_PROXY: "http://127.0.0.1:7890"
-      http_proxy: "http://127.0.0.1:7890"
-      https_proxy: "http://127.0.0.1:7890"
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      http_proxy: "${HTTP_PROXY:-}"
+      https_proxy: "${HTTPS_PROXY:-}"
     # 用 host 网络模式：让容器共享宿主机网络栈，能直接访问 127.0.0.1:7890 上的本地代理
     # 这是国内环境下让容器内 Python 访问交易所最可靠的方式
     # （之前用 bridge 模式 + host.docker.internal 在 OrbStack 下不可达）
@@ -61,9 +62,9 @@ services:
     env_file:
       - .env
     environment:
-      # 走本地代理访问 LLM（国内环境必填；agnes-ai / openai 都过代理）
-      HTTPS_PROXY: "http://127.0.0.1:7890"
-      https_proxy: "http://127.0.0.1:7890"
+      # 走代理访问 LLM（国内环境必填；从 .env 注入 HTTPS_PROXY，留空则不代理）
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      https_proxy: "${HTTPS_PROXY:-}"
       # SQLite 路径必须在容器内可写；默认就是 /app/data/sentinel.db
       DATABASE_URL: "sqlite:////app/data/sentinel.db"
       # 想停掉后台 scheduler/weekly rollup 时设 false
