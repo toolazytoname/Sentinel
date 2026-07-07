@@ -151,8 +151,8 @@
   - **依赖**: 建议在 RB.1 做完（否决表就绪）后一起做，因为异步预计算天然能拿到更全的 context。
   - **DoD**: 规则 2、规则 3 要么真实生效、要么在代码注释和本文件里明确标注「暂缺 + 原因」，不留「写死成 0 假装启用」的状态；全测试绿。
 
-- [ ] **RB.3** DB session 所有权混乱：借来的请求 session 被中途关闭
-  ⚠️ BLOCKED（2026-07-07，标 🧠 待强模型）：机械替换 `lambda: db`→`get_session` 会让 `_persist` 用**模块级 engine**，与测试套件经 `get_db` 依赖覆盖注入的 engine 不是同一个 → 写入库与读取库分离，`test_trade_close_webhook.py` 4 个测试变红（`reflection_id=None`、`recorded` 变 `skipped`）。已回退，无悬空。**正确修法**：统一 writer 的 session engine 与测试覆盖 engine（如让 `_persist` 复用请求 session 但不用 `with` 关闭它，或测试同时覆盖 `get_session`）——需重构 session 接线，非机械改动。RA.2 改为独立做（不依赖本任务，见 RA.2）。
+- [x] **RB.3** DB session 所有权混乱：借来的请求 session 被中途关闭
+  ✅ 完成于 2026-07-07（经 RT.1 解锁）：两处 `ReflectionWriter(extractor, lambda: db)` → `get_session`，`_persist` 用自己的新 session、不再关闭借来的请求 session。校验 subagent 隔离实验证明：不加 RT.1 只上本改动会让 4 个 trade_close 测试真失败（跨库 bug），加 RT.1 后全绿。`reflection.py` 未动。全量 220 passed。
   - **文件**: `ai-service/app/main.py`（2 处）+ `ai-service/app/modules/reflection.py`
   - **定位**: main.py 搜索 `ReflectionWriter(extractor, lambda: db)`（约第 266 行和第 421 行，两处都要改）
   - **问题**: 这两处把请求级 session `db` 用 `lambda: db` 传进 `ReflectionWriter`。而 `reflection.py` 的 `_persist` 里写的是 `with self._session_factory() as session:` —— 对 SQLAlchemy 的 `Session` 用 `with` 会在退出时 **`close()` 掉这个 session**。于是 `writer.record()` 一跑完，请求的 `db` 就被关了；`/trade-close` 第 431 行还拿这个已关闭的 `db` 去 `get_reflection_by_trade_id` 再查一次（靠 SQLAlchemy「关闭后自动开新事务」的隐式行为侥幸能跑，但语义是错的、脆弱）。同时 `get_db()` 的 `finally` 又会 close 一次（双重关闭）。
@@ -349,7 +349,8 @@
 
 ## RT — 测试基建（MED，解锁被 BLOCK 的 RB.3）
 
-- [ ] **RT.1** 🧠 统一 session 供给，使测试覆盖与生产 engine 一致（解锁 RB.3）
+- [x] **RT.1** 🧠 统一 session 供给，使测试覆盖与生产 engine 一致（解锁 RB.3）
+  ✅ 完成于 2026-07-07：新增 `ai-service/tests/conftest.py`（`bind_module_engine`/`reset_module_engine`），让测试把模块级 `_engine`/`_SessionLocal` 绑到与 `get_db` 覆盖同一个 test engine，`get_session()` 与请求 `db` 读写同库；teardown 复位单例 + `reset_caches_for_testing()` 防泄漏。据此解锁并完成 RB.3。全量 220 passed（两次跑 + 混合子集 54 passed 验隔离）。
   - **背景**: RB.3 被 BLOCK 的根因是——测试通过覆盖 FastAPI 依赖 `get_db` 注入测试 session，但 `ReflectionWriter` 内部若改用模块级 `get_session`，用的是另一个 engine，导致写入库 ≠ 读取库。这说明**测试基建对「非请求路径的 session」没有统一覆盖点**，是个真实的架构薄弱点。
   - **问题**: 生产里 `get_db` 与 `get_session` 共享模块 engine（一致）；但测试只覆盖了 `get_db`，没覆盖 `get_session`。任何走 `get_session` 的后台/写库路径在测试里都指向真 engine。
   - **修复方向**（先写方案）:

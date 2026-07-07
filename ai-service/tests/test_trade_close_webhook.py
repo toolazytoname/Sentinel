@@ -16,7 +16,6 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
@@ -26,6 +25,7 @@ from app.db.models import Base, ReflectionRow  # noqa: E402
 from app.deps import get_db, reset_caches_for_testing  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas import VetoDecision  # noqa: E402
+from tests.conftest import bind_module_engine, reset_module_engine  # noqa: E402
 
 
 # --- Fake LLM that always returns a valid TradeReflection ----------------
@@ -88,8 +88,13 @@ def _build_app():
     Base.metadata.drop_all(test_engine)
     Base.metadata.create_all(test_engine)
 
+    # RT.1: bind the module-level engine (used by get_session inside the
+    # ReflectionWriter) to the SAME test engine the get_db override uses, so
+    # the writer and the request/test read one shared database.
+    session_local = bind_module_engine(test_engine)
+
     def override_get_db():
-        s = sessionmaker(bind=test_engine, expire_on_commit=False)()
+        s = session_local()
         try:
             yield s
         finally:
@@ -113,6 +118,7 @@ def _build_app():
         OpenAICompatibleClient._make_client = original_make_client
         OpenAICompatibleClient._make_async_client = original_make_async
         app.dependency_overrides.clear()
+        reset_module_engine()
 
 
 def _payload(
@@ -298,8 +304,10 @@ def test_trade_close_returns_503_when_llm_unavailable():
     Base.metadata.drop_all(test_engine)
     Base.metadata.create_all(test_engine)
 
+    session_local = bind_module_engine(test_engine)
+
     def override_get_db():
-        s = sessionmaker(bind=test_engine, expire_on_commit=False)()
+        s = session_local()
         try:
             yield s
         finally:
@@ -321,6 +329,7 @@ def test_trade_close_returns_503_when_llm_unavailable():
         OpenAICompatibleClient._make_client = original_make_client
         OpenAICompatibleClient._make_async_client = original_make_async
         app.dependency_overrides.clear()
+        reset_module_engine()
 
 
 # --- Validation ----------------------------------------------------------

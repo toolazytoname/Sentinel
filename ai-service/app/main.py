@@ -277,7 +277,7 @@ def submit_reflection(
         signal_snapshot=body.signal_snapshot,
         closed_at=body.closed_at,
     )
-    writer = ReflectionWriter(extractor, lambda: db)  # session factory for the writer
+    writer = ReflectionWriter(extractor, get_session)  # fresh-session factory (RB.3)
     try:
         reflection = writer.record(ctx)
     except LLMUnavailable as e:
@@ -434,7 +434,7 @@ def trade_close(
     )
 
     # 4. Run reflection writer (LLM + persist). 503 propagates on LLM failure.
-    writer = ReflectionWriter(extractor, lambda: db)
+    writer = ReflectionWriter(extractor, get_session)  # fresh-session factory (RB.3)
     try:
         writer.record(ctx)
     except LLMUnavailable as e:
