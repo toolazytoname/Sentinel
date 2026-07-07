@@ -58,6 +58,7 @@ from app.modules.stages import (
     check_stage_upgrade,
     register_strategy,
 )
+from app.modules.events import current_event_window_minutes
 from app.modules.veto import MarketContext, TradeSignal, audit, check_rules
 from app.notifier import TelegramNotifier
 
@@ -209,11 +210,15 @@ def strategy_veto(
     # from DB state (recent high-severity events) and uses fixed safe limits.
     base_asset = pair.split("/")[0]
     high_sev_assets = recent_high_severity_assets(db, since_hours=24)
+    # Rule 3: derive the "major event window" from the static calendar. Loaded
+    # once per request; current_event_window_minutes fails open to 0 on any
+    # broken/missing calendar so Rule 3 can never 500 the hot path.
+    event_window_min = current_event_window_minutes()
     context = MarketContext(
         recent_high_severity_events=[base_asset] if base_asset in high_sev_assets else [],
         current_total_exposure_pct=0.0,  # strategy doesn't know the book; rule 2 disabled
         max_exposure_pct=1.0,            # disabled (no real exposure info)
-        upcoming_event_window_minutes=0,
+        upcoming_event_window_minutes=event_window_min,
     )
     signal = TradeSignal(
         strategy=strategy,

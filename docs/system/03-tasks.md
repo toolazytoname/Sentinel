@@ -142,6 +142,7 @@
   - **DoD**: `GET /veto` 不在请求内调 LLM；全测试绿；本任务下留有方案说明。
 
 - [ ] **RB.2** `GET /veto` 把规则 2、规则 3 写死成失效
+  🔶 **规则3 完成（2026-07-07）**：新增 `ai-service/app/data/event_calendar.json`（手维护宏观事件窗口，UTC）+ `app/modules/events.py`（纯加载/计算，破损/缺失→[]/0 fail-open）；`GET /veto` 与 `run_llm_veto_precompute` 的 context 用 `current_event_window_minutes()` 计算 `upcoming_event_window_minutes`，启用 check_rules 规则3（事件前 <30min VETO）。破损日历降级为 0 不 500。修了 `.gitignore` 的 `data/` 误伤 app/data。全量 268 passed。**剩余 = 规则2（敞口）**：需接 freqtrade 只读 REST 拿真实总持仓（ADR-002 允许 AI→freqtrade 只读）——这是独立集成，依赖你的 freqtrade REST 配置/凭据，**未做、保持 context 敞口禁用不伪造**。
   - **文件**: `ai-service/app/main.py`
   - **定位**: 搜索 `current_total_exposure_pct=0.0,  # strategy doesn't know the book`（约第 180-183 行）
   - **问题**: `GET /veto` 里把 `current_total_exposure_pct=0.0`、`max_exposure_pct=1.0`、`upcoming_event_window_minutes=0` 写死，等于**规则 2（敞口超限）和规则 3（重大事件窗口）永久失效**——设计文档 §2.2 的 4 项检查，实盘只剩 1 项（规则 1）活着。

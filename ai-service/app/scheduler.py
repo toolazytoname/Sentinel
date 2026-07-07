@@ -168,6 +168,7 @@ def run_llm_veto_precompute(session_factory, veto_extractor, notifier=None) -> N
         recent_veto_query_pairs,
     )
     from app.llm import LLMUnavailable
+    from app.modules.events import current_event_window_minutes
     from app.modules.veto import MarketContext, TradeSignal, llm_veto
 
     # Read the candidate set + shared rule-1 context once.
@@ -178,6 +179,10 @@ def run_llm_veto_precompute(session_factory, veto_extractor, notifier=None) -> N
     if not pairs:
         logger.info("llm veto precompute: no recent query pairs, nothing to do")
         return
+
+    # Rule 3: derive the "major event window" once per job (fail-open to 0 on a
+    # broken/missing calendar). Shared across all pairs for this run.
+    event_window_min = current_event_window_minutes()
 
     written = 0
     for strategy, pair in pairs:
@@ -191,7 +196,7 @@ def run_llm_veto_precompute(session_factory, veto_extractor, notifier=None) -> N
                 ),
                 current_total_exposure_pct=0.0,
                 max_exposure_pct=1.0,
-                upcoming_event_window_minutes=0,
+                upcoming_event_window_minutes=event_window_min,
             )
             signal = TradeSignal(
                 strategy=strategy, pair=pair, side="long", stake_pct=0.05,

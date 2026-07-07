@@ -52,6 +52,8 @@ out/
 *.db
 *.duckdb
 data/
+!ai-service/app/data/
+!ai-service/app/data/**
 backups/
 
 # ===== freqtrade 用户数据（含配置、策略、交易历史）=====

@@ -416,6 +416,76 @@ def test_get_veto_rule_veto_takes_priority_over_llm_row():
         assert len(router.calls) == 0
 
 
+def test_get_veto_blocks_on_imminent_calendar_event(tmp_path, monkeypatch):
+    """RB.2 Rule 3: an imminent macro event (via static calendar) → VETO.
+
+    Points EVENT_CALENDAR_PATH at a temp calendar with an event ~15 min out.
+    GET /veto must return decision=VETO with an event_window reason, and it
+    must STILL never call the LLM in-request (hot path stays LLM-free).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime.now(timezone.utc) + timedelta(minutes=15)
+    end = start + timedelta(minutes=30)
+    cal = [{
+        "name": "TEST FOMC",
+        "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }]
+    cal_file = tmp_path / "event_calendar.json"
+    cal_file.write_text(json.dumps(cal))
+    monkeypatch.setenv("EVENT_CALENDAR_PATH", str(cal_file))
+
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "VETO"
+        assert "event_window" in body["reason"]
+        # Hot path must never touch the LLM, even when Rule 3 fires.
+        assert len(router.calls) == 0
+
+
+def test_get_veto_passes_with_no_imminent_calendar_event(tmp_path, monkeypatch):
+    """A far-future calendar event must NOT block trading (Rule 3 inert)."""
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime.now(timezone.utc) + timedelta(hours=5)
+    end = start + timedelta(hours=1)
+    cal = [{
+        "name": "TEST FOMC far",
+        "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }]
+    cal_file = tmp_path / "event_calendar.json"
+    cal_file.write_text(json.dumps(cal))
+    monkeypatch.setenv("EVENT_CALENDAR_PATH", str(cal_file))
+
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["decision"] == "PASS"
+        assert body["reason"] == "rules_passed"
+        assert len(router.calls) == 0
+
+
+def test_get_veto_fails_open_on_broken_calendar(tmp_path, monkeypatch):
+    """A missing/broken calendar must degrade to PASS, never a 500 (fail-open)."""
+    monkeypatch.setenv("EVENT_CALENDAR_PATH", str(tmp_path / "nope.json"))
+    router = FakeLLMRouter(VetoDecision(veto=False, reason="unused", confidence=0.5))
+    with _build_app_with_fake_llm(router):
+        client = TestClient(app)
+        resp = client.get("/veto", params={"strategy": "S1", "pair": "BTC/USDT"})
+        assert resp.status_code == 200
+        assert resp.json()["decision"] == "PASS"
+        assert len(router.calls) == 0
+
+
 def test_research_note_submit_and_persist():
     with _build_app_with_fake_llm(FakeLLMRouter(VetoDecision(veto=False, reason="no risk", confidence=0.5))):
         client = TestClient(app)
