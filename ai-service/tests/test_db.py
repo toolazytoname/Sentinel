@@ -1,12 +1,15 @@
 """DB layer tests. Use in-memory SQLite for speed."""
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+import app.db.models as models
 from app.db.models import Base, StrategyStageRow
 from app.db.repository import (
     STAGES,
@@ -141,3 +144,104 @@ class TestStrategyStages:
         # ADR-005 state machine stages — must include all four
         expected = {"backtest", "dry_run", "live_small", "live_scaled"}
         assert set(STAGES) == expected
+
+
+@pytest.fixture
+def reset_engine_singleton():
+    """Reset the module-level engine singleton so get_engine rebuilds.
+
+    RB2.1: the concurrency test needs a real file-based SQLite DB routed
+    through the production get_engine() so it exercises the WAL + busy_timeout
+    hardening. We reset before AND after so we never leak a temp-file engine
+    into other tests (which rely on their own in-memory engines).
+    """
+    prev_engine, prev_session = models._engine, models._SessionLocal
+    models._engine = None
+    models._SessionLocal = None
+    yield
+    if models._engine is not None:
+        models._engine.dispose()
+    models._engine = prev_engine
+    models._SessionLocal = prev_session
+
+
+class TestSqliteConcurrencyHardening:
+    """RB2.1 — WAL + busy_timeout + check_same_thread for concurrent writers."""
+
+    def test_wal_pragma_applied_on_file_db(self, tmp_path, reset_engine_singleton):
+        db_path = tmp_path / "wal.db"
+        engine = models.get_engine(f"sqlite:///{db_path}")
+        with engine.connect() as conn:
+            journal_mode = conn.execute(text("PRAGMA journal_mode")).scalar()
+            busy_timeout = conn.execute(text("PRAGMA busy_timeout")).scalar()
+        assert journal_mode.lower() == "wal"
+        assert busy_timeout == 5000
+
+    def test_concurrent_writers_no_database_locked(self, tmp_path, reset_engine_singleton):
+        db_path = tmp_path / "concurrent.db"
+        models.get_engine(f"sqlite:///{db_path}")
+
+        rows_per_thread = 25
+        errors: list[Exception] = []
+        barrier = threading.Barrier(2)
+
+        def write_veto_records() -> None:
+            barrier.wait()
+            try:
+                for i in range(rows_per_thread):
+                    session = models.get_session()
+                    try:
+                        insert_veto_record(
+                            session,
+                            strategy="S1TrendFollow",
+                            pair="BTC/USDT",
+                            veto=bool(i % 2),
+                            reason=f"veto-{i}",
+                            source="rule",
+                        )
+                    finally:
+                        session.close()
+            except Exception as exc:  # noqa: BLE001 - capture for assertion
+                errors.append(exc)
+
+        def write_research_notes() -> None:
+            barrier.wait()
+            try:
+                for i in range(rows_per_thread):
+                    session = models.get_session()
+                    try:
+                        insert_research_note(
+                            session,
+                            asset="BTC",
+                            event_type="regulatory",
+                            severity=4,
+                            summary=f"event-{i}",
+                            source_url=f"https://example.com/{i}",
+                            published_at="2026-07-06T10:00:00Z",
+                        )
+                    finally:
+                        session.close()
+            except Exception as exc:  # noqa: BLE001 - capture for assertion
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=write_veto_records),
+            threading.Thread(target=write_research_notes),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not any(isinstance(e, OperationalError) for e in errors), (
+            f"database-is-locked / OperationalError raised under concurrency: {errors}"
+        )
+        assert not errors, f"unexpected errors: {errors}"
+
+        # All rows from both writer threads persisted.
+        verify = models.get_session()
+        try:
+            assert len(list(recent_vetoes(verify, since_hours=24))) == rows_per_thread
+            assert recent_high_severity_assets(verify, since_hours=24) == {"BTC"}
+        finally:
+            verify.close()

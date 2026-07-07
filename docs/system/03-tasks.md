@@ -313,6 +313,7 @@
 ## RB2 — 健壮性 / 正确性（MED）
 
 - [ ] **RB2.1** 🧠 SQLite 并发写无保护，scheduler 线程 + 请求线程易「database is locked」
+  🔶 **部分完成（2026-07-07，短期加固 option 1）**：`get_engine` 对 sqlite URL 加 `check_same_thread=False` + connect 钩子设 `PRAGMA journal_mode=WAL` / `busy_timeout=5000`，Postgres URL 严格 no-op；新增并发写测试（2 线程各写 25 行不 locked）+ WAL 生效断言。全量 220 passed。**剩余（可选，强模型）**：按 ADR-007 迁移到 PostgreSQL（与 RB.4 Alembic 合并做）——WAL 只是缓解，多写者高并发下 Postgres 才是终态。
   - **文件**: `ai-service/app/db/models.py` 第 112 行 `create_engine(url, echo=False, future=True)`
   - **问题**: `BackgroundScheduler`（后台线程）写 `research_notes`，同时 FastAPI 请求线程写 `veto_records`/`reflections`。SQLite 默认单写者 + 无 busy timeout，并发下会抛 `database is locked`；且多线程用 SQLite 未设 `check_same_thread=False` 有隐患。设计文档 §2.4/ADR-007 本就规划 PostgreSQL，SQLite 只是临时。
   - **修复方向**（二选一）:

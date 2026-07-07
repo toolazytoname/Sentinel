@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    event,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -109,7 +110,23 @@ def get_engine(url: str = "sqlite:///./sentinel.db"):
     """
     global _engine, _SessionLocal
     if _engine is None:
-        _engine = create_engine(url, echo=False, future=True)
+        is_sqlite = url.startswith("sqlite")
+        # SQLite: allow cross-thread use (BackgroundScheduler writes research_notes
+        # while FastAPI request threads write veto_records/reflections). No-op for
+        # Postgres and other backends.
+        connect_args = {"check_same_thread": False} if is_sqlite else {}
+        _engine = create_engine(
+            url, echo=False, future=True, connect_args=connect_args
+        )
+        if is_sqlite:
+            # Enable WAL + a busy timeout on every new connection so concurrent
+            # writers retry instead of failing with "database is locked".
+            @event.listens_for(_engine, "connect")
+            def _set_sqlite_pragma(dbapi_conn, _rec):  # noqa: ANN001
+                cur = dbapi_conn.cursor()
+                cur.execute("PRAGMA journal_mode=WAL")
+                cur.execute("PRAGMA busy_timeout=5000")
+                cur.close()
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
         Base.metadata.create_all(_engine)
     return _engine
