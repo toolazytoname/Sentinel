@@ -214,7 +214,8 @@
   - **验证**: `python -m pytest strategies -q` 全绿（现有策略测试就是校验信号正确性的）。
   - **DoD**: 两个策略的 populate 无 Python 逐行循环；测试绿。
 
-- [ ] **RC.4** 更新过期的 README（当前谎称「设计阶段，无代码」）
+- [x] **RC.4** 更新过期的 README（当前谎称「设计阶段，无代码」）
+  ✅ 完成于 2026-07-07，备注：badge 改 Phase 2 in progress + Code Phase 0/1/2 implemented + Tests 268 passed；当前状态段列各 Phase 真实进度；新增「快速开始（本地开发）」一节（cp .env.example → docker compose up → curl 两个健康端点 → pytest）；免责声明改写为「实盘前必须走完 ADR-005 状态机」。
   - **文件**: `README.md`
   - **问题**: 第 8 行 badge `Code: Coming Soon`、第 30 行「本仓库目前**只包含设计文档**，代码尚未开始编写」——但 Phase 0/1/2 已大量落地（freqtrade 骨架、S1/S2 策略、AI 服务全套、199 个测试）。误导任何新接棒的人/AI。
   - **修复**:
