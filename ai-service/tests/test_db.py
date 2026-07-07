@@ -146,6 +146,96 @@ class TestStrategyStages:
         assert set(STAGES) == expected
 
 
+class TestEnsureSchemaBackfill:
+    """RB.4 — idempotent schema reconciler adds missing columns to an OLD DB.
+
+    Simulates a ``sentinel.db`` created before ``strategy_stages`` gained its
+    rolling-counter columns and proves ``ensure_schema`` back-fills them
+    without losing existing rows, and is a no-op on a second run.
+    """
+
+    # Old schema: strategy_stages WITHOUT trade_count / max_observed_drawdown_pct
+    _OLD_STRATEGY_STAGES_DDL = (
+        "CREATE TABLE strategy_stages ("
+        "id INTEGER PRIMARY KEY, "
+        "strategy VARCHAR, "
+        "stage VARCHAR, "
+        "entered_at DATETIME, "
+        "criteria_snapshot JSON, "
+        "approved_by VARCHAR)"
+    )
+
+    def _cols(self, engine, table: str) -> set[str]:
+        from sqlalchemy import inspect as sa_inspect
+
+        return {c["name"] for c in sa_inspect(engine).get_columns(table)}
+
+    def test_backfills_missing_columns_without_data_loss(self, tmp_path):
+        db_path = tmp_path / "old_sentinel.db"
+        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        try:
+            # Arrange: build an OLD strategy_stages table + seed a row.
+            with engine.begin() as conn:
+                conn.execute(text(self._OLD_STRATEGY_STAGES_DDL))
+                conn.execute(
+                    text(
+                        "INSERT INTO strategy_stages "
+                        "(id, strategy, stage, entered_at, criteria_snapshot, approved_by) "
+                        "VALUES (1, 'S1', 'dry_run', '2026-07-06T10:00:00', '{}', 'system')"
+                    )
+                )
+
+            before = self._cols(engine, "strategy_stages")
+            assert "trade_count" not in before
+            assert "max_observed_drawdown_pct" not in before
+
+            # Act
+            models.ensure_schema(engine)
+
+            # Assert: new columns present, existing row intact.
+            after = self._cols(engine, "strategy_stages")
+            assert "trade_count" in after
+            assert "max_observed_drawdown_pct" in after
+
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT strategy, stage, approved_by, trade_count, "
+                        "max_observed_drawdown_pct FROM strategy_stages WHERE id = 1"
+                    )
+                ).one()
+            assert row.strategy == "S1"
+            assert row.stage == "dry_run"
+            assert row.approved_by == "system"
+            # Back-filled from the model's default so existing rows are valid.
+            assert row.trade_count == 0
+            assert row.max_observed_drawdown_pct == 0.0
+        finally:
+            engine.dispose()
+
+    def test_ensure_schema_is_idempotent(self, tmp_path):
+        db_path = tmp_path / "idem.db"
+        engine = create_engine(f"sqlite:///{db_path}", future=True)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(self._OLD_STRATEGY_STAGES_DDL))
+
+            models.ensure_schema(engine)
+            cols_first = self._cols(engine, "strategy_stages")
+            # Second run must not raise and must not change the schema.
+            models.ensure_schema(engine)
+            cols_second = self._cols(engine, "strategy_stages")
+            assert cols_first == cols_second
+
+            # And it created the wholly-missing tables the first time.
+            from sqlalchemy import inspect as sa_inspect
+
+            tables = set(sa_inspect(engine).get_table_names())
+            assert {"research_notes", "reflections", "veto_records"} <= tables
+        finally:
+            engine.dispose()
+
+
 @pytest.fixture
 def reset_engine_singleton():
     """Reset the module-level engine singleton so get_engine rebuilds.

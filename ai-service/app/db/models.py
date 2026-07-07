@@ -9,6 +9,7 @@ schema; business logic (e.g. VETO priority) lives in app/modules/*.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -22,8 +23,12 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -96,6 +101,100 @@ class StrategyStageRow(Base):
     max_observed_drawdown_pct: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
 
+# --- Schema reconciliation (lightweight, idempotent — see RB.4) ---
+#
+# Base.metadata.create_all() only CREATES wholly-missing tables; it never adds a
+# new COLUMN to an existing table. A sentinel.db persisted from before a model
+# gained a column (e.g. strategy_stages.trade_count) would raise "no such column"
+# at runtime on redeploy. This reconciler diffs the live schema against the ORM
+# models and ADDs any missing columns. Deliberately not full Alembic: this is a
+# single-node personal system; Alembic/Postgres is a documented future upgrade.
+
+
+def _column_default_sql(column) -> Optional[str]:
+    """Render an SQL literal for a column's default, or None if it has none.
+
+    A DEFAULT is required to add a NOT NULL column to a table with existing rows
+    (so those rows get a valid value). Server-side defaults win; otherwise a
+    scalar Python-side default is rendered. Callable/sequence defaults are
+    skipped (no static literal to emit).
+    """
+    if column.server_default is not None:
+        arg = column.server_default.arg
+        return arg.text if hasattr(arg, "text") else str(arg)
+
+    default = column.default
+    if default is None or default.is_callable or default.is_sequence:
+        return None
+    value = default.arg
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("'", "''")
+        return f"'{escaped}'"
+    return None
+
+
+def _add_column_ddl(table_name: str, column, dialect) -> str:
+    """Build a dialect-appropriate ``ALTER TABLE ... ADD COLUMN`` statement."""
+    col_type = column.type.compile(dialect)
+    default_sql = _column_default_sql(column)
+    parts = [column.name, col_type]
+    # Only assert NOT NULL when we can back-fill existing rows with a default;
+    # otherwise SQLite (and others) reject the ALTER on a populated table.
+    if not column.nullable and default_sql is not None:
+        parts.append("NOT NULL")
+    if default_sql is not None:
+        parts.append(f"DEFAULT {default_sql}")
+    return f"ALTER TABLE {table_name} ADD COLUMN {' '.join(parts)}"
+
+
+def ensure_schema(engine) -> None:
+    """Idempotently reconcile the live DB schema against the ORM models.
+
+    1. ``create_all`` — creates any wholly-missing tables (engine-agnostic;
+       works for sqlite and postgres alike).
+    2. ``inspect`` each mapped table and diff its live columns against the model.
+    3. For each column present in the model but missing in the DB, issue an
+       ``ALTER TABLE ... ADD COLUMN`` (with the model's default so existing rows
+       are back-filled). Each ALTER is wrapped so a race/duplicate never crashes
+       startup.
+
+    Idempotent (a second run is a no-op) and dialect-tolerant: we only ADD
+    columns — never drop, rename, or change types (all SQLite supports).
+    """
+    Base.metadata.create_all(engine)
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in existing_tables:
+            # create_all should have built it; skip defensively if not.
+            continue
+        existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+        for column in table.columns:
+            if column.name in existing_cols:
+                continue
+            ddl = _add_column_ddl(table_name, column, engine.dialect)
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+                logger.warning(
+                    "ensure_schema: added missing column %s.%s",
+                    table_name,
+                    column.name,
+                )
+            except Exception as exc:  # noqa: BLE001 - never crash startup on ALTER
+                logger.warning(
+                    "ensure_schema: could not add column %s.%s: %s",
+                    table_name,
+                    column.name,
+                    exc,
+                )
+
+
 # --- Engine + session factory ---
 
 _engine = None
@@ -128,7 +227,7 @@ def get_engine(url: str = "sqlite:///./sentinel.db"):
                 cur.execute("PRAGMA busy_timeout=5000")
                 cur.close()
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
-        Base.metadata.create_all(_engine)
+        ensure_schema(_engine)
     return _engine
 
 

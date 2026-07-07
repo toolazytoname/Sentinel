@@ -163,7 +163,8 @@
   - **验证**: `python -m pytest ai-service/tests/test_api.py ai-service/tests/test_trade_close_webhook.py ai-service/tests/test_reflection.py -q` 全绿。若变红，说明测试是用 `lambda: db` 注入的特殊 session，**停下来标 🧠**，别硬改。
   - **DoD**: 两处改完；相关测试全绿。
 
-- [ ] **RB.4** SQLite 无 migration，加了列但老库不会自动升级（重部署会炸）
+- [x] **RB.4** SQLite 无 migration，加了列但老库不会自动升级（重部署会炸）
+  🔶 **完成（2026-07-07，采用轻量方案 option 2）**：新增 `ensure_schema(engine)`——`create_all` 建缺表 + `inspect` 逐表比对、`ALTER TABLE ADD COLUMN` 回填缺列（有默认值才 NOT NULL，老行不丢数据），幂等、sqlite/postgres 兼容；`get_engine` 里替换裸 `create_all`。新增回填测试（模拟老库缺 `trade_count`/`max_observed_drawdown_pct` → 回填且旧行可读）。全量 222 passed。**决策留痕**：单机个人系统不上重型 Alembic；全量 **Alembic + 迁移 PostgreSQL** 留作规模上来（策略数 >5 或多写高并发）后的文档化升级项，与 RB2.1 剩余合并。
   - **文件**: `ai-service/app/db/models.py`
   - **问题**: P2.1 的 DoD 写的是「用 Alembic 管 migration」，但实现用的是 `Base.metadata.create_all()`（`models.py` 第 114 行）。`create_all` **只建不改**——`StrategyStageRow` 已经比设计文档 §2.4 多了两列（`trade_count`、`max_observed_drawdown_pct`，第 94-95 行）。**已经有数据的旧 sentinel.db 在新代码下不会自动加这两列，查询会报 `no such column`**。docker volume `ai_data` 是持久化的，重部署时这个坑必踩。
   - **修复方向**（二选一，KISS 优先选 1）:
