@@ -4,9 +4,37 @@
 > 每个任务标注了验收标准（DoD）。完成一个勾一个，不要跳跃。
 > 标 🧠 的任务遇到困难时建议升级回强模型处理。
 
+---
+
+## ⚠️ 现状对账（2026-07-15，强模型全局复核）
+
+> **接棒者必读——不要再盲取「第一个 `[ ]`」。** 下面是对 P0/P1/P2 真实落地情况的诚实校准（代码在但 DoD 未必全达成）。
+> 便宜模型的机械任务（Phase R + R2）**已全部清零**（274 passed, 2 skipped, 覆盖率 91.7%）。剩下的都是需你做投资判断 + 强模型执行的活。
+
+**🔴 头号根因风险（决定「用不用得起来」，非工程问题）：策略层是空转的发动机。**
+- S1 趋势跟踪：3.5 年训练期**只出 3 笔交易**，2024–2026 牛市留出段 **0 笔**（`05-hyperopt-results.md` §3.3）。
+- dry-run 容器已 up 9 天但处于 `_process_stopped` 状态、**0 笔交易**（`dry-run.json` 未设 `initial_state`，默认停机）。
+- ADR-005 升档要求 **≥30 笔交易** → 当前 S1 单策略下**几十年也走不完状态机**。安全网/否决/复盘/升级核查这一整套纪律机器，在当前策略下永远不会被触发第一次。
+- **这不是 bug 可以「修」的**：要么承认「趋势跟踪就该长期沉默」并靠 S2/更多币种/更多策略提供信号密度，要么改 S1 逻辑（加 pairs、降周期、加次级信号）——**两条都是 🧠 且需用户先拍板投资取向**。
+
+**各任务真实状态**（详见下方各条的「📍现状」行）：
+| 任务 | 状态 | 真相 |
+|---|---|---|
+| P0.1–P0.4 | ✅ | 骨架/compose/config 模板/notifier 均在 |
+| P1.1 | 🔶 | 只下了 BTC/ETH 的 1d+4h，**非**「市值前 15」 |
+| P1.2 | 🔶 | S1 实现+回测含 2022，但仅 3 笔交易；`lookahead-analysis` 本机未跑 |
+| P1.3 | 🔶 | S2 **只编码、未部署未回测**（`deploy/.../strategies/` 无 S2 文件）|
+| P1.4 | 🔶 | hyperopt 完成，但**留出段 0 交易 → DoD「留出段年化为正」未达成** |
+| P1.5 | ⬜ | jesse 交叉验证**从未做**（无 `research/` 目录）|
+| P1.6 | 🔶 | 容器在跑但 **STOPPED 态 + 0 交易**，观察期实为空转 |
+| P1.7 | ✅ | StrategyBase + 超时降级测试在 |
+| P2.1–P2.6 | ✅ | AI 服务全套（DB/LLM/研究/否决/复盘/升级核查）落地且测试覆盖 |
+
+---
+
 ## Phase 0 — 环境与骨架（预计 1-2 天）
 
-- [ ] **P0.1** 初始化 git 仓库，建目录结构：
+- [x] **P0.1** 初始化 git 仓库，建目录结构：
   ```
   finance/
   ├── docs/            (已有)
@@ -17,44 +45,61 @@
   └── research/        jesse 回测环境 + notebook
   ```
   DoD: git init 完成，.gitignore 覆盖密钥/数据文件（`*.env`, `user_data/`, `*.sqlite`）
-- [ ] **P0.2** docker-compose 起 freqtrade dry-run + FreqUI，用官方示例策略跑通
+  📍现状: ✅ 完成。目录结构齐（`research/` 尚缺，见 P1.5）。
+- [x] **P0.2** docker-compose 起 freqtrade dry-run + FreqUI，用官方示例策略跑通
   DoD: 浏览器能打开 FreqUI 看到 dry-run 交易；参考 https://www.freqtrade.io/en/stable/docker_quickstart/
-- [ ] **P0.3** 配置 Telegram bot，能收到 freqtrade 通知、能用 /status 查询
+  📍现状: ✅ compose 落地，`sentinel-freqtrade` up 9 天 healthy。⚠️ 但 bot 处 STOPPED 态、0 交易（见 P1.6）。
+- [x] **P0.3** 配置 Telegram bot，能收到 freqtrade 通知、能用 /status 查询
   DoD: 手机收到 dry-run 开仓通知
-- [ ] **P0.4** 编写 `deploy/config.template.json`，包含 02-design.md §2.1 的所有强制项
+  📍现状: ✅ `notifier.py` + webhook secret 校验（RS.1）落地。**手机端实收未由本复核验证**（S1 至今 0 开仓，无从触发开仓通知）。
+- [x] **P0.4** 编写 `deploy/config.template.json`，包含 02-design.md §2.1 的所有强制项
   DoD: Protections 三件套 + stoploss_on_exchange 均在模板中，有注释说明每项为什么存在
+  📍现状: ✅ 三件套 Protections + stoploss_on_exchange + max_open_trades:3 均在（Phase R 复核确认）。
 
 ## Phase 1 — 策略与验证流水线（预计 1-2 周）
 
-- [ ] **P1.1** 下载历史数据：BTC/ETH/市值前15现货，1d+4h，2020 至今
+- [ ] 🔶 **P1.1** 下载历史数据：BTC/ETH/市值前15现货，1d+4h，2020 至今
   DoD: `freqtrade download-data` 完成，数据完整性抽查无缺口
-- [ ] **P1.2** 🧠 实现 S1 趋势跟踪策略（见 02-design.md §3）
+  📍现状: 🔶 **部分**。只下了 BTC/ETH 的 1d+4h（2020-06→2026-06，约 2200 根）。**市值前 15 未下**——这直接导致 P1.4 hyperopt 样本过小。加 pairs 是提高 S1 信号密度的前置项。
+- [ ] 🔶 **P1.2** 🧠 实现 S1 趋势跟踪策略（见 02-design.md §3）
   DoD: 回测 2021-2025 跑通；**必须包含 2022 熊市**；lookahead-analysis 通过；指标计算函数有单测
-- [ ] **P1.3** 🧠 实现 S2 动量轮动策略
+  📍现状: 🔶 **部分**。策略实现 + 单测齐，回测含 2022。但：① 3.5 年仅 3 笔交易（信号太稀，见头号根因风险）；② `freqtrade lookahead-analysis` **本机未跑**（RC.3 已标：向量化等价性证明了，但上线前仍需手动跑一次）。
+- [ ] 🔶 **P1.3** 🧠 实现 S2 动量轮动策略
   DoD: 同上
-- [ ] **P1.4** 超参优化 + walk-forward：hyperopt 只在 2020-2023 训练段跑，2024-2026 作为留出段验证
+  📍现状: 🔶 **只编码未部署**。`strategies/s2_momentum_rotation/` 有实现+单测，但 `deploy/user_data/strategies/` 里**没有 S2 文件**，也无 S2 的 backtest/hyperopt 产物。S2 从未在真实数据上验证过。**部署+回测 S2 是让 dry-run「有交易可观察」最快的路。**
+- [ ] 🔶 **P1.4** 超参优化 + walk-forward：hyperopt 只在 2020-2023 训练段跑，2024-2026 作为留出段验证
   DoD: 留出段年化为正且回撤 <25%；训练段和留出段表现差距有书面解释
+  📍现状: 🔶 **DoD 未达成**。hyperopt 跑了（`05-hyperopt-results.md`），但**留出段 0 交易 → 年化 0，不是「为正」**。报告诚实解释了原因（牛市无新金叉），但这恰恰说明 S1 单币种样本不足以支撑 walk-forward。**需先做 P1.1（加 pairs）或改 S1，再重跑。**
 - [ ] **P1.5** 🧠 jesse 交叉验证：把 S1/S2 逻辑在 jesse 复现，跑 Monte Carlo
   DoD: research/ 下有 notebook 记录结果；若两框架回测结论矛盾，停下来报告用户
-- [ ] **P1.6** S1、S2 进入 dry-run 阶段，登记 strategy_stages（此时可先用一个 markdown 文件人工记录，AI 服务还没建）
+  📍现状: ⬜ **从未做**。无 `research/` 目录。上实盘前的一道闸，属 🧠。
+- [ ] 🔶 **P1.6** S1、S2 进入 dry-run 阶段，登记 strategy_stages（此时可先用一个 markdown 文件人工记录，AI 服务还没建）
   DoD: 两策略 dry-run 容器 7x24 运行，Telegram 心跳正常
-- [ ] **P1.7** 编写 `StrategyBase` 基类（confirm_trade_entry 查否决表的骨架，AI 服务未上线前默认 PASS）
+  📍现状: 🔶 **空转**。`sentinel-freqtrade` up 9 天，但 ① 处 STOPPED 态（`dry-run.json` 缺 `initial_state`，需设 `running` 或 Telegram `/start`）；② 只挂了 S1，无 S2 容器；③ 0 交易。观察期实为空。
+- [x] **P1.7** 编写 `StrategyBase` 基类（confirm_trade_entry 查否决表的骨架，AI 服务未上线前默认 PASS）
   DoD: 单测覆盖超时降级路径（AI 服务不可达 → 放行 + 告警日志）
+  📍现状: ✅ 完成。双副本 + 漂移守卫测试（RC.1）；fail-open 降级路径有测试。
 
 ## Phase 2 — AI 服务（预计 2-3 周，与 dry-run 观察期并行）
 
-- [ ] **P2.1** FastAPI 骨架 + PostgreSQL + 02-design.md §2.4 的四张表（用 Alembic 管 migration）
+- [x] **P2.1** FastAPI 骨架 + PostgreSQL + 02-design.md §2.4 的四张表（用 Alembic 管 migration）
   DoD: docker-compose 集成，健康检查端点，pytest 骨架，覆盖率报告接入
-- [ ] **P2.2** LLM 抽象层：OpenAI-compatible 客户端，deep/quick 双档配置，带重试/超时/成本记录
+  📍现状: ✅ 骨架/健康检查/覆盖率门槛（91.7%）齐。⚠️ 两处偏差：仍用 **SQLite**（非 Postgres，WAL 加固过，RB2.1）；用轻量 `ensure_schema` 幂等回填**替代 Alembic**（RB.4，规模上来前的文档化升级项）。
+- [x] **P2.2** LLM 抽象层：OpenAI-compatible 客户端，deep/quick 双档配置，带重试/超时/成本记录
   DoD: 单测（mock LLM）；每次调用的 token 消耗落库可查
-- [ ] **P2.3** 研究模块：接 2-3 个免费源（CoinGecko API、交易所公告 RSS），每日定时摘要入库
+  📍现状: ✅ 完成，token/成本落 `llm_calls` 表（RB2.4）。
+- [x] **P2.3** 研究模块：接 2-3 个免费源（CoinGecko API、交易所公告 RSS），每日定时摘要入库
   DoD: research_notes 每天有数据；severity≥4 推 Telegram；LLM 输出用 Pydantic schema 校验，校验失败重试
-- [ ] **P2.4** 🧠 风控审计模块：规则检查 4 项 + LLM 反方陈述，暴露 `GET /veto?strategy=&pair=` 接口
+  📍现状: ✅ 定时 job + Pydantic 校验 + severity≥4 告警路径（RA.1 修了那条曾经静默崩溃的告警）。
+- [x] **P2.4** 🧠 风控审计模块：规则检查 4 项 + LLM 反方陈述，暴露 `GET /veto?strategy=&pair=` 接口
   DoD: 集成测试覆盖：规则触发 VETO / LLM 触发 VETO / 服务超时策略端放行 三条路径；StrategyBase 接入真实接口
-- [ ] **P2.5** 复盘模块：平仓 webhook 触发单笔复盘，周日定时生成周报
+  📍现状: ✅ 主体完成。LLM 否决异步收官后**真生效**（RB.1）；规则 1/3 生效，**规则 2（敞口）仍禁用**（需接 freqtrade 只读 REST，RB.2 剩余）。
+- [x] **P2.5** 复盘模块：平仓 webhook 触发单笔复盘，周日定时生成周报
   DoD: dry-run 的真实平仓能触发复盘入库 + Telegram 周报收到
-- [ ] **P2.6** 升级核查模块：每日核查 ADR-005 状态机条件，出报告
+  📍现状: ✅ webhook + 周报 job 落地。⚠️ **「dry-run 真实平仓触发」至今未被真实事件验证**（0 交易 → 0 平仓）。
+- [x] **P2.6** 升级核查模块：每日核查 ADR-005 状态机条件，出报告
   DoD: strategy_stages 表接管 P1.6 的人工记录；升级/降级建议推 Telegram
+  📍现状: ✅ 每日核查 job 落地。⚠️ 当前数据下永远出「hold」（0 交易，不满足任何升档条件）。
 
 ## Phase 3 — 看板（预计 1-2 周）
 
