@@ -22,7 +22,7 @@
 
     // ──────────────────── 交易所 ────────────────────
     // Binance（Binance 的 ccxt 实现最稳定）
-    // 国内网络必须走代理：httpsProxy 指向 127.0.0.1:7890（docker-compose 用 host 网络模式）
+    // 代理由 .env 的 HTTP_PROXY / HTTPS_PROXY 可选注入（docker-compose 用 host 网络模式）。
     // pair_whitelist/blacklist 在 freqtrade 2026.6 中已迁移到 exchange 块内
     // 换代理端口时同步改这里和 deploy/docker-compose.yml
     "exchange": {
@@ -41,15 +41,13 @@
         "ccxt_config": {
             "enableRateLimit": true,
             "timeout": 30000,
-            "httpsProxy": "http://127.0.0.1:7890",
-            "aiohttp_trust_env": false,
+            "aiohttp_trust_env": true,
             "options": {"defaultType": "spot"}
         },
         "ccxt_async_config": {
             "enableRateLimit": true,
             "timeout": 30000,
-            "httpsProxy": "http://127.0.0.1:7890",
-            "aiohttp_trust_env": false,
+            "aiohttp_trust_env": true,
             "options": {"defaultType": "spot"}
         }
     },

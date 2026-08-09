@@ -37,6 +37,14 @@ def test_dry_run_starts_and_binds_frequi_to_loopback():
     assert config["api_server"]["listen_ip_address"] == "127.0.0.1"
 
 
+def test_exchange_proxy_is_supplied_only_by_the_environment():
+    exchange = _config()["exchange"]
+    assert exchange["ccxt_config"]["aiohttp_trust_env"] is True
+    assert exchange["ccxt_async_config"]["aiohttp_trust_env"] is True
+    assert "httpsProxy" not in exchange["ccxt_config"]
+    assert "httpsProxy" not in exchange["ccxt_async_config"]
+
+
 def test_dry_run_keeps_core_risk_limits_enabled():
     config = _config()
     assert config["max_open_trades"] <= 3

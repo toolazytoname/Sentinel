@@ -106,16 +106,16 @@ docker compose restart freqtrade
 
 ```yaml
 environment:
-  - HTTP_PROXY=http://host.docker.internal:7890
-  - HTTPS_PROXY=http://host.docker.internal:7890
+  - HTTP_PROXY=${HTTP_PROXY:-}
+  - HTTPS_PROXY=${HTTPS_PROXY:-}
   ...
 ```
 
-`host.docker.internal` 是 Docker 访问宿主机回环地址的官方别名。如果你在 Linux 上跑（用 Docker Desktop 或原生 Docker），这个别名也可用；如果是 Linux 服务器上的原生 docker，请改成宿主机的内网 IP。
+本项目使用 host 网络模式，因此 macOS 本机代理通常填写 `http://127.0.0.1:7890`；VPS 或可直连网络则留空。不要把代理地址硬编码进策略配置。
 
 **如果你换了代理端口**（比如 Clash 用了 7891），需要：
-1. 改 `docker-compose.yml` 的端口
-2. 改 `.gitignore` 不变的 `.env` 中保留的代理配置（如有）
+1. 改 `.gitignore` 不跟踪的 `.env` 中的 `HTTP_PROXY` / `HTTPS_PROXY`
+2. 确认代理客户端确实监听该端口
 3. 重建容器：`docker compose up -d --force-recreate freqtrade`
 
 ## 7. 安全清单（运维前必看）
