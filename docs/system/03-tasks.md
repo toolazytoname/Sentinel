@@ -39,7 +39,7 @@
   ✅ 完成于 2026-08-09，commit `50756b7`，备注：新增 runtime 配置契约测试；保留旧 Telegram 环境变量的启动脚本兼容映射，未读取或修改 `.env` 密钥。
 - [ ] **R3.2** 启动并验证 dry-run 观察闭环（需 Docker/OrbStack 可用）
   DoD: `docker compose up -d` 后日志确认 `RUNNING`；FreqUI 仅可从本机访问；Telegram `/status` 收到响应；确认 protections 已加载。记录启动时间、镜像版本和验证证据；仍不得切换 live 或接触提现权限。
-  📍现状: Docker/OrbStack 已恢复，旧配置硬编码代理已移除；系统代理 `127.0.0.1:7891` 可达，但 Binance API 返回 HTTP 451（地域/合规拒绝），尚不能加载市场信息。需用户指定合规且可访问的 Freqtrade 支持交易所，或切换至合规可访问的网络出口后再启动验证。
+  📍现状: Docker/OrbStack 已恢复；本地 `.env` 已按用户指令设置 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 为 `127.0.0.1:7891`，且同一配置实测 Binance `/api/v3/ping` 仍返回 HTTP 451（地域/合规拒绝）。尚不能加载市场信息；需切换至合规可访问的网络出口后再启动验证。
 
 ---
 

@@ -29,7 +29,7 @@
 - **hyperopt 过拟合**：只在训练段跑 hyperopt（P1.4 的划分），留出段只许看一次。反复用留出段调参 = 留出段失效。
 - **LLM JSON 输出不稳定**：所有 LLM 输出必须过 Pydantic 校验，失败要有重试与降级，绝不 `json.loads` 裸解析后直接用。
 - **AI 服务的可用性语义**：AI 服务挂掉时策略必须默认放行（fail-open）并告警。AI 是保险丝不是闸门——反过来会导致 AI 故障阻塞整个交易系统。
-- **网络**：本机环境遇到 GitHub/API 超时，先 `export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890`。
+- **网络**：本机环境遇到 GitHub/API 超时，使用 `export https_proxy=http://127.0.0.1:7891 http_proxy=http://127.0.0.1:7891 all_proxy=socks5://127.0.0.1:7891`。
 - **时区**：所有时间戳统一 UTC 存储，展示层再转。加密市场没有"收盘价"，日线边界用 UTC 00:00。
 
 ## 项目背景速览

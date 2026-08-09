@@ -16,6 +16,7 @@ DRY_RUN_CONFIG = REPO_ROOT / "deploy/user_data/config/dry-run.json"
 DEPLOYED_S1 = REPO_ROOT / "deploy/user_data/strategies/S1TrendFollow.py"
 SOURCE_S1 = REPO_ROOT / "strategies/s1_trend_follow/strategy.py"
 START_SCRIPT = REPO_ROOT / "deploy/start.sh"
+COMPOSE_FILE = REPO_ROOT / "deploy/docker-compose.yml"
 
 
 def _config() -> dict:
@@ -43,6 +44,14 @@ def test_exchange_proxy_is_supplied_only_by_the_environment():
     assert exchange["ccxt_async_config"]["aiohttp_trust_env"] is True
     assert "httpsProxy" not in exchange["ccxt_config"]
     assert "httpsProxy" not in exchange["ccxt_async_config"]
+
+
+def test_compose_passes_all_standard_proxy_variables_to_freqtrade():
+    compose = COMPOSE_FILE.read_text(encoding="utf-8")
+    assert 'HTTP_PROXY: "${HTTP_PROXY:-}"' in compose
+    assert 'HTTPS_PROXY: "${HTTPS_PROXY:-}"' in compose
+    assert 'ALL_PROXY: "${ALL_PROXY:-}"' in compose
+    assert 'all_proxy: "${ALL_PROXY:-}"' in compose
 
 
 def test_dry_run_keeps_core_risk_limits_enabled():
