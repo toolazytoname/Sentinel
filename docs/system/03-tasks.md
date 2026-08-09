@@ -36,7 +36,7 @@
 
 - [x] **R3.1** 修复 dry-run 静态运行配置与运行时风控挂载
   DoD: 实际 `dry-run.json` 明确 `initial_state: running`、FreqUI 仅绑定 loopback、Telegram 使用 Freqtrade 标准 `FREQTRADE__TELEGRAM__*` 环境变量；S1 源码与部署副本均以策略属性加载 `MaxDrawdown` / `StoplossGuard` / `CooldownPeriod`；有静态契约测试防回归。
-  ✅ 完成于 2026-08-09，备注：新增 runtime 配置契约测试；保留旧 Telegram 环境变量的启动脚本兼容映射，未读取或修改 `.env` 密钥。
+  ✅ 完成于 2026-08-09，commit `50756b7`，备注：新增 runtime 配置契约测试；保留旧 Telegram 环境变量的启动脚本兼容映射，未读取或修改 `.env` 密钥。
 - [ ] **R3.2** 启动并验证 dry-run 观察闭环（需 Docker/OrbStack 可用）
   DoD: `docker compose up -d` 后日志确认 `RUNNING`；FreqUI 仅可从本机访问；Telegram `/status` 收到响应；确认 protections 已加载。记录启动时间、镜像版本和验证证据；仍不得切换 live 或接触提现权限。
   📍阻塞: 当前开发机 Docker socket 不可连接，无法替用户启动或验证容器；R3.1 仅完成静态安全配置。
