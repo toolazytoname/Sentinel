@@ -10,6 +10,7 @@
     "fiat_display_currency": "USD",
     "timeframe": "1d",
     "dry_run": true,
+    "initial_state": "running",
     "cancel_open_orders_on_exit": false,
 
     "exchange": {
@@ -54,7 +55,7 @@
     ],
 
     "telegram": {
-        "enabled": false,
+        "enabled": true,
         "token": "",
         "chat_id": "",
         "notification_settings": {
@@ -95,7 +96,7 @@
 
     "api_server": {
         "enabled": true,
-        "listen_ip_address": "0.0.0.0",
+        "listen_ip_address": "127.0.0.1",
         "listen_port": 8080,
         "verbosity": "info",
         "jwt_secret_key": "${API_JWT_SECRET}",

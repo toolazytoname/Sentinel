@@ -32,6 +32,17 @@
 
 ---
 
+## Phase R3 — dry-run 运行闭环恢复（2026-08-09）
+
+- [x] **R3.1** 修复 dry-run 静态运行配置与运行时风控挂载
+  DoD: 实际 `dry-run.json` 明确 `initial_state: running`、FreqUI 仅绑定 loopback、Telegram 使用 Freqtrade 标准 `FREQTRADE__TELEGRAM__*` 环境变量；S1 源码与部署副本均以策略属性加载 `MaxDrawdown` / `StoplossGuard` / `CooldownPeriod`；有静态契约测试防回归。
+  ✅ 完成于 2026-08-09，备注：新增 runtime 配置契约测试；保留旧 Telegram 环境变量的启动脚本兼容映射，未读取或修改 `.env` 密钥。
+- [ ] **R3.2** 启动并验证 dry-run 观察闭环（需 Docker/OrbStack 可用）
+  DoD: `docker compose up -d` 后日志确认 `RUNNING`；FreqUI 仅可从本机访问；Telegram `/status` 收到响应；确认 protections 已加载。记录启动时间、镜像版本和验证证据；仍不得切换 live 或接触提现权限。
+  📍阻塞: 当前开发机 Docker socket 不可连接，无法替用户启动或验证容器；R3.1 仅完成静态安全配置。
+
+---
+
 ## Phase 0 — 环境与骨架（预计 1-2 天）
 
 - [x] **P0.1** 初始化 git 仓库，建目录结构：
@@ -51,7 +62,7 @@
   📍现状: ✅ compose 落地，`sentinel-freqtrade` up 9 天 healthy。⚠️ 但 bot 处 STOPPED 态、0 交易（见 P1.6）。
 - [x] **P0.3** 配置 Telegram bot，能收到 freqtrade 通知、能用 /status 查询
   DoD: 手机收到 dry-run 开仓通知
-  📍现状: ✅ `notifier.py` + webhook secret 校验（RS.1）落地。**手机端实收未由本复核验证**（S1 至今 0 开仓，无从触发开仓通知）。
+  📍现状: 🔶 静态配置已于 R3.1 修复为标准 `FREQTRADE__TELEGRAM__*` 注入；**容器运行与手机端 `/status` 尚未验证**（见 R3.2；S1 至今 0 开仓）。
 - [x] **P0.4** 编写 `deploy/config.template.json`，包含 02-design.md §2.1 的所有强制项
   DoD: Protections 三件套 + stoploss_on_exchange 均在模板中，有注释说明每项为什么存在
   📍现状: ✅ 三件套 Protections + stoploss_on_exchange + max_open_trades:3 均在（Phase R 复核确认）。
@@ -75,7 +86,7 @@
   📍现状: ⬜ **从未做**。无 `research/` 目录。上实盘前的一道闸，属 🧠。
 - [ ] 🔶 **P1.6** S1、S2 进入 dry-run 阶段，登记 strategy_stages（此时可先用一个 markdown 文件人工记录，AI 服务还没建）
   DoD: 两策略 dry-run 容器 7x24 运行，Telegram 心跳正常
-  📍现状: 🔶 **空转**。`sentinel-freqtrade` up 9 天，但 ① 处 STOPPED 态（`dry-run.json` 缺 `initial_state`，需设 `running` 或 Telegram `/start`）；② 只挂了 S1，无 S2 容器；③ 0 交易。观察期实为空。
+  📍现状: 🔶 R3.1 已修复静态 STOPPED 根因（`initial_state: running`）并补上 S1 实际 Protections；R3.2 尚待 Docker 启动验证。② 只挂了 S1，无 S2 容器；③ 0 交易。观察期尚未开始。
 - [x] **P1.7** 编写 `StrategyBase` 基类（confirm_trade_entry 查否决表的骨架，AI 服务未上线前默认 PASS）
   DoD: 单测覆盖超时降级路径（AI 服务不可达 → 放行 + 告警日志）
   📍现状: ✅ 完成。双副本 + 漂移守卫测试（RC.1）；fail-open 降级路径有测试。

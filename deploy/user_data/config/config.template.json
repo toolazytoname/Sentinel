@@ -107,9 +107,9 @@
 
     // ──────────────────── Telegram（明天起床后填） ────────────────────
     "telegram": {
-        "enabled": false,            // 等 .env 里填了 token 改为 true
-        "token": "${FREQTELEGRAM__TELEGRAM_TOKEN}",
-        "chat_id": "${FREQTELEGRAM__CHAT_ID}",
+        "enabled": true,             // token/chat_id 由 FREQTRADE__TELEGRAM__* 环境变量覆盖
+        "token": "",
+        "chat_id": "",
         "notification_settings": {
             "status": "on",
             "warning": "on",
@@ -161,7 +161,7 @@
     // ──────────────────── API Server（FreqUI 后端） ────────────────────
     "api_server": {
         "enabled": true,
-        "listen_ip_address": "0.0.0.0",
+        "listen_ip_address": "127.0.0.1",
         "listen_port": 8080,
         "verbosity": "info",
         "jwt_secret_key": "${API_JWT_SECRET}",

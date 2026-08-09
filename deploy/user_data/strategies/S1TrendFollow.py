@@ -111,6 +111,26 @@ class S1TrendFollow(StrategyBase):
     }
     order_time_in_force = {"entry": "GTC", "exit": "GTC"}
 
+    @property
+    def protections(self):
+        """Engine-level circuit breakers required by the Sentinel design."""
+        return [
+            {
+                "method": "MaxDrawdown",
+                "lookback_period": 1440,
+                "stop_duration": 1440,
+                "trade_limit": 1,
+                "max_allowed_drawdown": 0.10,
+            },
+            {
+                "method": "StoplossGuard",
+                "lookback_period": 240,
+                "stop_duration": 720,
+                "trade_limit": 3,
+            },
+            {"method": "CooldownPeriod", "stop_duration_candles": 2},
+        ]
+
     # ── Indicators ────────────────────────────────────────────────────────
 
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:

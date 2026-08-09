@@ -22,8 +22,8 @@ cd /Users/lazy/Code/crack/finance/deploy
 chmod 600 .env
 
 # 2. 编辑 .env，填入密钥（明早起床后做）
-#    - FREQTELEGRAM__TELEGRAM_TOKEN（@BotFather 创建机器人获取）
-#    - FREQTELEGRAM__CHAT_ID（@userinfobot 获取你的数字 user_id）
+#    - FREQTRADE__TELEGRAM__TOKEN（@BotFather 创建机器人获取）
+#    - FREQTRADE__TELEGRAM__CHAT_ID（@userinfobot 获取你的数字 user_id）
 #    - API_PASSWORD（FreqUI 登录密码，建议至少 16 位）
 #    - API_JWT_SECRET（JWT 签名密钥，任意长随机字符串）
 #    - EXCHANGE_KEY/SECRET（Phase 0 dry-run 留空；切 live 前必填）
@@ -75,14 +75,14 @@ docker compose run --rm freqtrade download-data \
 # Step 1：创建 Telegram bot
 #   手机 Telegram → 搜索 @BotFather → 发送 /new
 #   按提示设置 name 和 username → 拿到 token（形如 123456789:ABC...）
-#   把它填进 deploy/.env 的 FREQTELEGRAM__TELEGRAM_TOKEN
+#   把它填进 deploy/.env 的 FREQTRADE__TELEGRAM__TOKEN
 
 # Step 2：获取你的 user_id（数字）
 #   搜索 @userinfobot → 发任意消息 → 它会回你 user_id
-#   填进 .env 的 FREQTELEGRAM__CHAT_ID
+#   填进 .env 的 FREQTRADE__TELEGRAM__CHAT_ID
 
 # Step 3：允许命令控制（可选，但推荐）
-#   把同一个 user_id 也填进 FREQTELEGRAM__ALLOWED_CHAT_IDS
+#   把同一个 user_id 也填进 FREQTRADE__TELEGRAM__ALLOWED_CHAT_IDS
 
 # Step 4：启用 freqtrade 的 telegram 模块
 #   编辑 deploy/user_data/config/dry-run.json：

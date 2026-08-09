@@ -198,6 +198,26 @@ try:
         hard_stop = DecimalParameter(0.05, 0.15, default=0.08, space="sell")
         trailing_stop_pct = DecimalParameter(0.03, 0.10, default=0.05, space="sell")
 
+        @property
+        def protections(self):
+            """Engine-level circuit breakers required by the Sentinel design."""
+            return [
+                {
+                    "method": "MaxDrawdown",
+                    "lookback_period": 1440,
+                    "stop_duration": 1440,
+                    "trade_limit": 1,
+                    "max_allowed_drawdown": 0.10,
+                },
+                {
+                    "method": "StoplossGuard",
+                    "lookback_period": 240,
+                    "stop_duration": 720,
+                    "trade_limit": 3,
+                },
+                {"method": "CooldownPeriod", "stop_duration_candles": 2},
+            ]
+
         def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
             params = StrategyParams()
             return compute_indicators(dataframe, params)
