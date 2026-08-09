@@ -73,3 +73,10 @@ def test_start_script_accepts_legacy_telegram_environment_names():
     script = START_SCRIPT.read_text(encoding="utf-8")
     assert "FREQTRADE__TELEGRAM__TOKEN" in script
     assert "FREQTELEGRAM__TELEGRAM_TOKEN" in script
+
+
+def test_start_script_enables_telegram_only_with_complete_credentials():
+    script = START_SCRIPT.read_text(encoding="utf-8")
+    assert 'export FREQTRADE__TELEGRAM__ENABLED="true"' in script
+    assert 'export FREQTRADE__TELEGRAM__ENABLED="false"' in script
+    assert 'bool(telegram_token and telegram_chat_id)' in script

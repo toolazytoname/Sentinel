@@ -69,11 +69,11 @@ docker compose run --rm freqtrade download-data \
     --timeframes 1d 4h --days 1500
 ```
 
-## 5. 明早起床后：激活 Telegram
+## 5. 激活 Telegram
 
 ```bash
 # Step 1：创建 Telegram bot
-#   手机 Telegram → 搜索 @BotFather → 发送 /new
+#   手机 Telegram → 搜索认证账号 @BotFather → 发送 /newbot
 #   按提示设置 name 和 username → 拿到 token（形如 123456789:ABC...）
 #   把它填进 deploy/.env 的 FREQTRADE__TELEGRAM__TOKEN
 
@@ -84,10 +84,10 @@ docker compose run --rm freqtrade download-data \
 # Step 3：允许命令控制（可选，但推荐）
 #   把同一个 user_id 也填进 FREQTRADE__TELEGRAM__ALLOWED_CHAT_IDS
 
-# Step 4：启用 freqtrade 的 telegram 模块
-#   编辑 deploy/user_data/config/dry-run.json：
-#     "telegram": { "enabled": true, ... }
-#   （token 和 chat_id 留空字符串即可，freqtrade 会从环境变量读）
+# Step 4：开始与机器人对话
+#   打开 BotFather 返回的机器人链接，点 Start 或发送 /start。
+#   不需要编辑 dry-run.json：启动脚本只在 token 和 chat_id 都有值时自动启用。
+#   缺少任一项时 Telegram 会安全禁用，不影响 dry-run 交易主进程。
 
 # Step 5：重启
 cd /Users/lazy/Code/crack/finance/deploy

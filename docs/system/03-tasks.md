@@ -39,7 +39,7 @@
   ✅ 完成于 2026-08-09，commit `50756b7`，备注：新增 runtime 配置契约测试；保留旧 Telegram 环境变量的启动脚本兼容映射，未读取或修改 `.env` 密钥。
 - [ ] **R3.2** 启动并验证 dry-run 观察闭环（需 Docker/OrbStack 可用）
   DoD: `docker compose up -d` 后日志确认 `RUNNING`；FreqUI 仅可从本机访问；Telegram `/status` 收到响应；确认 protections 已加载。记录启动时间、镜像版本和验证证据；仍不得切换 live 或接触提现权限。
-  📍现状: 2026-08-09 已切到 ClashX `127.0.0.1:7890`，Binance API 与容器 CCXT 市场加载均验证成功；`sentinel-freqtrade` healthy，日志确认 `state='RUNNING'`，FreqUI 仅监听 `127.0.0.1:8080`，三项 Protections 已加载。Telegram 的 SOCKS 初始化问题已修复（容器仅用 HTTP/HTTPS 代理）；尚待用户从手机发送 `/status` 验证回包后才能勾选完成。
+  📍现状: 2026-08-09 已切到 ClashX `127.0.0.1:7890`，Binance API 与容器 CCXT 市场加载均验证成功；`sentinel-freqtrade` healthy，日志确认 `state='RUNNING'`，FreqUI 仅监听 `127.0.0.1:8080`，三项 Protections 已加载。复核发现本地 Telegram token/chat ID 均为空，旧日志实际报 `InvalidToken`，此前“已配置”记录不成立；启动脚本现会在凭据不完整时安全禁用 Telegram。尚待用户创建 bot、在本地 `.env` 填齐凭据并从手机验证 `/status` 后才能勾选完成。
 
 ---
 
@@ -62,7 +62,7 @@
   📍现状: ✅ compose 落地，`sentinel-freqtrade` up 9 天 healthy。⚠️ 但 bot 处 STOPPED 态、0 交易（见 P1.6）。
 - [x] **P0.3** 配置 Telegram bot，能收到 freqtrade 通知、能用 /status 查询
   DoD: 手机收到 dry-run 开仓通知
-  📍现状: 🔶 静态配置已于 R3.1 修复为标准 `FREQTRADE__TELEGRAM__*` 注入；**容器运行与手机端 `/status` 尚未验证**（见 R3.2；S1 至今 0 开仓）。
+  📍现状: 🔶 2026-08-09 复核确认本地 token/chat ID 均为空，历史勾选不代表当前环境已接通；静态配置已改为标准 `FREQTRADE__TELEGRAM__*` 注入，**尚待创建 bot 与手机端 `/status` 验证**（见 R3.2；S1 至今 0 开仓）。
 - [x] **P0.4** 编写 `deploy/config.template.json`，包含 02-design.md §2.1 的所有强制项
   DoD: Protections 三件套 + stoploss_on_exchange 均在模板中，有注释说明每项为什么存在
   📍现状: ✅ 三件套 Protections + stoploss_on_exchange + max_open_trades:3 均在（Phase R 复核确认）。

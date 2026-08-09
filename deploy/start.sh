@@ -17,8 +17,18 @@ if [ -n "${FREQTELEGRAM__ALLOWED_CHAT_IDS:-}" ] && [ -z "${FREQTRADE__TELEGRAM__
     export FREQTRADE__TELEGRAM__ALLOWED_CHAT_IDS="$FREQTELEGRAM__ALLOWED_CHAT_IDS"
 fi
 
+# A Telegram client login does not configure a bot.  Keep the trading process
+# healthy when bot credentials are absent or only partially configured, and
+# automatically enable Telegram once both required values are present.
+if [ -n "${FREQTRADE__TELEGRAM__TOKEN:-}" ] && [ -n "${FREQTRADE__TELEGRAM__CHAT_ID:-}" ]; then
+    export FREQTRADE__TELEGRAM__ENABLED="true"
+else
+    export FREQTRADE__TELEGRAM__ENABLED="false"
+fi
+
 python3 - <<'PYEOF'
-import os, sys
+import json
+import os
 
 src = open("/freqtrade/user_data/config/dry-run.json").read()
 dst = (
@@ -27,7 +37,12 @@ dst = (
     .replace("${API_JWT_SECRET}", os.environ.get("API_JWT_SECRET", ""))
     .replace("${AI_SERVICE_WEBHOOK_URL}", os.environ.get("AI_SERVICE_WEBHOOK_URL", "http://127.0.0.1:8000"))
 )
-open("/tmp/dry-run-runtime.json", "w").write(dst)
+config = json.loads(dst)
+telegram_token = os.environ.get("FREQTRADE__TELEGRAM__TOKEN", "").strip()
+telegram_chat_id = os.environ.get("FREQTRADE__TELEGRAM__CHAT_ID", "").strip()
+config["telegram"]["enabled"] = bool(telegram_token and telegram_chat_id)
+with open("/tmp/dry-run-runtime.json", "w") as runtime_config:
+    json.dump(config, runtime_config)
 PYEOF
 
 exec freqtrade trade \
