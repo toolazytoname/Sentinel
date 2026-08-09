@@ -60,7 +60,7 @@ Postgres，只需改 `DATABASE_URL` 环境变量 + 加 `postgres` service（已
 
 ### 2.4 LLM 访问走代理
 
-跟 freqtrade 一样注入 `HTTPS_PROXY=http://127.0.0.1:7891`，因为 ai-service
+跟 freqtrade 一样注入 `HTTPS_PROXY=http://127.0.0.1:7890`，因为 ai-service
 调用的 agnes-ai / openai 也需要本地代理（国内环境）。
 
 ### 2.5 非 root 用户 + 写入目录
@@ -83,7 +83,7 @@ Dockerfile 的 `HEALTHCHECK` 用 `curl` 直打 `/healthz`——这要求镜像�
 
 环境变量（ai-service 容器）：
 - `DATABASE_URL=sqlite:////app/data/sentinel.db`（持久化到 named volume）
-- `HTTPS_PROXY=http://127.0.0.1:7891`（来自 docker-compose environment）
+- `HTTPS_PROXY=http://127.0.0.1:7890`（来自 docker-compose environment）
 - `SCHEDULER_ENABLED=true`（可在 .env 里设 false 停掉后台任务）
 - `AI_SERVICE_HOST=127.0.0.1` / `AI_SERVICE_PORT=8000`（绑 loopback）
 - `AGNES_API_KEY` 或 `OPENAI_API_KEY`（**.env 当前为空**——见 §5）

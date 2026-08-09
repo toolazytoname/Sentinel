@@ -36,6 +36,7 @@ def test_dry_run_starts_and_binds_frequi_to_loopback():
     assert config["dry_run"] is True
     assert config["initial_state"] == "running"
     assert config["api_server"]["listen_ip_address"] == "127.0.0.1"
+    assert config["verbosity"] <= 1
 
 
 def test_exchange_proxy_is_supplied_only_by_the_environment():
@@ -46,12 +47,12 @@ def test_exchange_proxy_is_supplied_only_by_the_environment():
     assert "httpsProxy" not in exchange["ccxt_async_config"]
 
 
-def test_compose_passes_all_standard_proxy_variables_to_freqtrade():
+def test_compose_uses_http_proxy_without_forcing_socks_on_freqtrade():
     compose = COMPOSE_FILE.read_text(encoding="utf-8")
     assert 'HTTP_PROXY: "${HTTP_PROXY:-}"' in compose
     assert 'HTTPS_PROXY: "${HTTPS_PROXY:-}"' in compose
-    assert 'ALL_PROXY: "${ALL_PROXY:-}"' in compose
-    assert 'all_proxy: "${ALL_PROXY:-}"' in compose
+    assert 'ALL_PROXY: ""' in compose
+    assert 'all_proxy: ""' in compose
 
 
 def test_dry_run_keeps_core_risk_limits_enabled():

@@ -106,6 +106,6 @@
     },
 
     "db_url": "sqlite:///user_data/tradesv3.sqlite",
-    "verbosity": 3,
+    "verbosity": 1,
     "logfile": "user_data/logs/freqtrade.log"
 }

@@ -10,7 +10,7 @@
 | Docker | 29.x | `docker --version` |
 | Docker Compose | v2.x | `docker compose version` |
 | OrbStack（macOS 推荐） | latest | OrbStack 已自带 docker socket |
-| 本地代理 | listening on 127.0.0.1:7891 | `lsof -iTCP:7891 -sTCP:LISTEN` |
+| 本地代理 | listening on 127.0.0.1:7890 | `lsof -iTCP:7890 -sTCP:LISTEN` |
 
 ## 2. 启动
 
@@ -111,7 +111,9 @@ environment:
   ...
 ```
 
-本项目使用 host 网络模式，因此当前 macOS 本机代理填写 `http://127.0.0.1:7891`（`ALL_PROXY=socks5://127.0.0.1:7891`）；VPS 或可直连网络则留空。不要把代理地址硬编码进策略配置。
+本项目使用 host 网络模式，因此当前 macOS 本机代理填写 `http://127.0.0.1:7890`（`ALL_PROXY=socks5://127.0.0.1:7890`）；VPS 或可直连网络则留空。不要把代理地址硬编码进策略配置。
+
+`ALL_PROXY` 保留给宿主机终端；Freqtrade 容器只使用 HTTP/HTTPS 代理，避免其 Telegram 依赖因未安装 SOCKS 支持而失效。
 
 **如果你换了代理端口**（比如 Clash 用了 7891），需要：
 1. 改 `.gitignore` 不跟踪的 `.env` 中的 `HTTP_PROXY` / `HTTPS_PROXY`
@@ -141,8 +143,8 @@ docker logs sentinel-freqtrade --tail 50
 - ✅ 容器正常启动、FreqUI 端口 8080 监听
 - ✅ freqtrade 进程存活、读到了 dry-run.json
 - ✅ Docker 代理环境变量注入成功（容器内访问 Binance/OKX API 不再是 "not available"）
-- ⚠️ **freqtrade 内部访问交易所仍然 RequestTimeout** —— 检查本地代理 (127.0.0.1:7891) 是否允许 `api.binance.com`；启动前先验证代理本身能否访问交易所。
-  - 验证命令（在主机终端）：`curl -x socks5h://127.0.0.1:7891 https://api.binance.com/api/v3/ping`（应返回 `{}`）
+- ⚠️ **freqtrade 内部访问交易所仍然 RequestTimeout** —— 检查本地代理 (127.0.0.1:7890) 是否允许 `api.binance.com`；启动前先验证代理本身能否访问交易所。
+  - 验证命令（在主机终端）：`curl -x socks5h://127.0.0.1:7890 https://api.binance.com/api/v3/ping`（应返回 `{}`）
   - 如不通，检查代理客户端（Clash / Surge / v2rayN）的规则列表，必要时切换节点或换代理端口
 - 📝 配置曾因 freqtrade 2026.6 弃用顶层 `protections` 而临时移除；Phase 1 实现自定义策略时需要在策略类内通过 `protections` 参数重新引入（这是 P1.x 的工作）
 

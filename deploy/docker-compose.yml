@@ -22,15 +22,16 @@ services:
     # 加载 .env 文件，把变量注入到 freqtrade 容器（嵌套设置用 FREQTRADE__* 变量）。
     env_file:
       - .env
-    # 代理环境变量：从 .env 注入（本机当前使用 127.0.0.1:7891，VPS 留空）。
+    # 代理环境变量：从 .env 注入（本机当前使用 127.0.0.1:7890，VPS 留空）。
     # 默认留空 = 不走代理。HTTPS_PROXY 同时设置大小写两份覆盖容器内 Python aiohttp/httpx 的各种读取路径。
     environment:
       HTTP_PROXY: "${HTTP_PROXY:-}"
       HTTPS_PROXY: "${HTTPS_PROXY:-}"
-      ALL_PROXY: "${ALL_PROXY:-}"
+      # python-telegram-bot in the stock image lacks SOCKS support.
+      ALL_PROXY: ""
       http_proxy: "${HTTP_PROXY:-}"
       https_proxy: "${HTTPS_PROXY:-}"
-      all_proxy: "${ALL_PROXY:-}"
+      all_proxy: ""
     # 用 host 网络模式：让容器共享宿主机网络栈，能直接访问本机代理。
     # 这是国内环境下让容器内 Python 访问交易所最可靠的方式
     # （之前用 bridge 模式 + host.docker.internal 在 OrbStack 下不可达）
