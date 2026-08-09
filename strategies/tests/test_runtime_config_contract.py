@@ -14,19 +14,23 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DRY_RUN_CONFIG = REPO_ROOT / "deploy/user_data/config/dry-run.json"
 DEPLOYED_S1 = REPO_ROOT / "deploy/user_data/strategies/S1TrendFollow.py"
+DEPLOYED_S2 = REPO_ROOT / "deploy/user_data/strategies/S2MomentumRotation.py"
 SOURCE_S1 = REPO_ROOT / "strategies/s1_trend_follow/strategy.py"
 START_SCRIPT = REPO_ROOT / "deploy/start.sh"
 COMPOSE_FILE = REPO_ROOT / "deploy/docker-compose.yml"
+RESEARCH_CONFIG = REPO_ROOT / "deploy/user_data/config/hyperopt.json"
 
 
 def _config() -> dict:
     return json.loads(DRY_RUN_CONFIG.read_text(encoding="utf-8"))
 
 
-def _strategy_methods(path: Path) -> set[str]:
+def _strategy_methods(path: Path, class_name: str = "S1TrendFollow") -> set[str]:
     module = ast.parse(path.read_text(encoding="utf-8"))
     strategy = next(
-        node for node in ast.walk(module) if isinstance(node, ast.ClassDef) and node.name == "S1TrendFollow"
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.ClassDef) and node.name == class_name
     )
     return {node.name for node in strategy.body if isinstance(node, ast.FunctionDef)}
 
@@ -80,3 +84,23 @@ def test_start_script_enables_telegram_only_with_complete_credentials():
     assert 'export FREQTRADE__TELEGRAM__ENABLED="true"' in script
     assert 'export FREQTRADE__TELEGRAM__ENABLED="false"' in script
     assert 'bool(telegram_token and telegram_chat_id)' in script
+
+
+def test_research_config_is_safe_and_uses_environment_proxy():
+    config = json.loads(RESEARCH_CONFIG.read_text(encoding="utf-8"))
+    assert config["dry_run"] is True
+    assert config["max_open_trades"] <= 3
+    assert config["stoploss_on_exchange"] is True
+    assert len(config["exchange"]["pair_whitelist"]) >= 15
+    assert config["rotation_pairs"] == config["exchange"]["pair_whitelist"]
+    assert "httpsProxy" not in config["exchange"]["ccxt_config"]
+    assert "httpsProxy" not in config["exchange"]["ccxt_async_config"]
+
+
+def test_deployed_s2_is_backtest_safe_and_keeps_protections():
+    source = DEPLOYED_S2.read_text(encoding="utf-8")
+    assert "get_analyzed_dataframe" not in source
+    assert "get_pair_dataframe" in source
+    assert 'self.config.get("rotation_pairs")' in source
+    assert "weekly_rotation_mask" in source
+    assert "protections" in _strategy_methods(DEPLOYED_S2, "S2MomentumRotation")

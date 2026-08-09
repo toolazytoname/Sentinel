@@ -9,15 +9,25 @@
     "fiat_display_currency": "USD",
     "timeframe": "1d",
 
-    "dry_run": false,
+    "dry_run": true,
     "dry_run_wallet": 1000,
+
+    "rotation_pairs": [
+        "BTC/USDT", "ETH/USDT", "BNB/USDT", "XRP/USDT", "SOL/USDT",
+        "TRX/USDT", "DOGE/USDT", "ZEC/USDT", "ADA/USDT", "LINK/USDT",
+        "XLM/USDT", "BCH/USDT", "GRAM/USDT", "LTC/USDT", "HBAR/USDT"
+    ],
 
     "exchange": {
         "name": "binance",
         "key": "",
         "secret": "",
-        "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
-        "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+        "pair_whitelist": [
+            "BTC/USDT", "ETH/USDT", "BNB/USDT", "XRP/USDT", "SOL/USDT",
+            "TRX/USDT", "DOGE/USDT", "ZEC/USDT", "ADA/USDT", "LINK/USDT",
+            "XLM/USDT", "BCH/USDT", "GRAM/USDT", "LTC/USDT", "HBAR/USDT"
+        ],
+        "pair_blacklist": [".*UP/.*", ".*DOWN/.*"],
         "markets_refresh_interval": 1000000,
         "ccxt_config": {
             "enableRateLimit": true,
@@ -25,7 +35,6 @@
         },
         "ccxt_async_config": {
             "enableRateLimit": true,
-            "httpsProxy": "http://127.0.0.1:7890",
             "aiohttp_trust_env": true
         }
     },
@@ -38,13 +47,13 @@
     ],
 
     "stoploss": -0.10,
-    "stoploss_on_exchange": false,
+    "stoploss_on_exchange": true,
 
     "entry_pricing": {"price_side": "same", "use_order_book": false},
     "exit_pricing": {"price_side": "same", "use_order_book": false},
 
     "db_url": "sqlite:///:memory:",
-    "verbosity": 1,
+    "verbosity": 0,
     "dataformat_ohlcv": "json",
 
     "strategy": "S1TrendFollow"
