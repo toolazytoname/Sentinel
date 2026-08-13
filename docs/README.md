@@ -14,7 +14,9 @@ docs/
 │   ├── 01-architecture.md        架构决策记录（ADR，为什么这么设计）
 │   ├── 02-design.md              Sentinel 设计（模块、接口、数据流）
 │   ├── 03-tasks.md               分阶段任务清单（接棒 AI 的工作队列）
-│   └── 04-handoff-guide.md       接棒指南（弱模型开发守则，必读）
+│   ├── 04-handoff-guide.md       接棒指南（弱模型开发守则，必读）
+│   ├── 05-hyperopt-results.md    S1 旧 hyperopt（金叉-only / BTC+ETH）
+│   ├── 08-s1-s2-backtest.md      2026-08 S1 回踩 + S2 回测（用户拍板）
 └── human/                    ← 给用户本人看的（人的线）
     ├── 01-build-vs-buy.md        要不要自己造？（决策论证）
     ├── 02-financial-growth-path.md  财商提升路径（学习地图）

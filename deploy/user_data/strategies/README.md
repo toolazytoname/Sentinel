@@ -1,12 +1,10 @@
-# Sentinel FreqUI 入口占位策略（Phase 0）
+# Sentinel FreqUI 策略挂载点
 
-> ⚠️ **本策略仅用于 Phase 0 跑通流程，不可用于实盘。**
-> Phase 1 将替换为 `S1TrendFollow` 和 `S2MomentumRotation`。
+本目录是 freqtrade 容器的 strategy-path。每个策略一个 `.py` 文件（Docker 镜像不挂载仓库根上的 `strategies/` 包）。
 
-本目录是 freqtrade 策略挂载点。Phase 0 启动时会自动从 freqtrade 官方策略路径加载 `SampleStrategy`（来自 freqtrade 容器内置）；当 `deploy/user_data/config/*.json` 中的 `"strategy"` 字段被改为自定义策略名时，freqtrade 会从本目录加载。
+当前：
+- `S1TrendFollow.py` — 趋势跟踪：金叉 **或** 上升趋势中回踩 EMA50 收回，ADX 过滤，硬止损 / 追踪止损
+- `S2MomentumRotation.py` — 动量轮动：市值/成交额宇宙内 30 日动量前 3，周一再平衡
+- `base.py` — AI 否决（fail-open）
 
-Phase 1 待创建：
-- `S1TrendFollow.py` — 趋势跟踪（双均线 + ADX 过滤 + 追踪止损）
-- `S2MomentumRotation.py` — 动量轮动（市值前十剔除稳定币 + 周度再平衡）
-
-详见 `docs/system/02-design.md` §3。
+改 `base.py` 必须同步 `strategies/base.py`。改 S1 信号必须同步 `strategies/s1_trend_follow/strategy.py`。

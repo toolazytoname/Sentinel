@@ -1,7 +1,7 @@
 {
     "$schema": "https://www.freqtrade.io/en/stable/schema.json",
-    "_comment": "由 config.template.json 生成。dry-run/live 唯一差异是 dry_run 字段。",
-    "_sentinel_phase": "Phase 0 — 跑通流程，不实盘",
+    "_comment": "S1 dry-run. dry-run/live 唯一差异应是 dry_run 字段（ADR-005）。",
+    "_sentinel_phase": "P1.6 — S1 dry-run, initial_state running",
 
     "max_open_trades": 3,
     "stake_currency": "USDT",
@@ -10,13 +10,30 @@
     "fiat_display_currency": "USD",
     "timeframe": "1d",
     "dry_run": true,
+    "initial_state": "running",
     "cancel_open_orders_on_exit": false,
 
     "exchange": {
         "name": "binance",
         "key": "",
         "secret": "",
-        "pair_whitelist": ["BTC/USDT", "ETH/USDT"],
+        "pair_whitelist": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "ADA/USDT",
+            "DOGE/USDT",
+            "AVAX/USDT",
+            "DOT/USDT",
+            "LINK/USDT",
+            "BCH/USDT",
+            "LTC/USDT",
+            "UNI/USDT",
+            "ATOM/USDT",
+            "FIL/USDT",
+            "NEAR/USDT"
+        ],
         "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
         "enable_ws": false,
         "ccxt_config": {

@@ -31,7 +31,20 @@
         "secret": "${EXCHANGE_SECRET}",
         "pair_whitelist": [
             "BTC/USDT",
-            "ETH/USDT"
+            "ETH/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "ADA/USDT",
+            "DOGE/USDT",
+            "AVAX/USDT",
+            "DOT/USDT",
+            "LINK/USDT",
+            "BCH/USDT",
+            "LTC/USDT",
+            "UNI/USDT",
+            "ATOM/USDT",
+            "FIL/USDT",
+            "NEAR/USDT"
         ],
         "pair_blacklist": [
             "BNB/.*",

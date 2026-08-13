@@ -1,10 +1,12 @@
-"""S1: Trend-following strategy on BTC/ETH daily.
+"""S1: Trend-following strategy on large-cap USDT daily.
 
 Logic
 -----
-Long-only. Enter when:
-  1. Fast EMA (50) crosses above Slow EMA (200) — golden cross
-  2. ADX > 25 (confirms trend strength, filters out choppy markets)
+Long-only. Enter when ADX > 25 AND fast EMA > slow EMA AND either:
+  1. Fast EMA (50) crosses above Slow EMA (200) — golden cross (regime change)
+  2. Close reclaims fast EMA after dipping below it — pullback in an
+     already-established uptrend (the 2024–2026 silence fix: no new golden
+     cross is required once the bull is underway)
 
 Exit (in priority order):
   1. custom_stoploss below -8% from entry → hard stop
@@ -48,39 +50,41 @@ def compute_indicators(
     df: pd.DataFrame,
     params: StrategyParams,
 ) -> pd.DataFrame:
-    """Return df with added columns: ema_fast, ema_slow, adx, golden_cross.
+    """Return df with added columns: ema_fast, ema_slow, adx, golden_cross,
+    death_cross, pullback_reclaim.
 
-    `golden_cross` is a boolean Series: True on the bar where fast EMA first
-    crosses above slow EMA.
+    Cross flags use only current/prior bars (shift(1)) — no future leakage.
+    `pullback_reclaim` is close crossing back above the fast EMA.
     """
     out = df.copy()
     out["ema_fast"] = ema(out["close"], params.fast_ema_period)
     out["ema_slow"] = ema(out["close"], params.slow_ema_period)
     out["adx"] = adx(out, period=14)
 
-    # Cross detection: fast > slow now AND fast <= slow on the prior bar
     fast = out["ema_fast"]
     slow = out["ema_slow"]
     out["golden_cross"] = (fast > slow) & (fast.shift(1) <= slow.shift(1))
     out["death_cross"] = (fast < slow) & (fast.shift(1) >= slow.shift(1))
+    # Prior close below fast EMA, this close back above — no current-bar high/low.
+    out["pullback_reclaim"] = (out["close"].shift(1) < fast.shift(1)) & (out["close"] >= fast)
     return out
 
 
 def entry_signal(row: pd.Series, params: StrategyParams) -> bool:
     """True on the bar where we should enter long.
 
-    Conservative: requires all three conditions to be true simultaneously.
-    - Golden cross just happened (row-level)
-    - Fast EMA > Slow EMA (sustained)
-    - ADX > entry threshold (trend is real, not noise)
+    Shared regime filter: Fast EMA > Slow EMA and ADX > threshold.
+    Trigger is either a golden cross OR a pullback reclaim of the fast EMA.
     """
     if pd.isna(row["adx"]) or pd.isna(row["ema_fast"]) or pd.isna(row["ema_slow"]):
         return False
-    if not row["golden_cross"]:
-        return False
     if not (row["ema_fast"] > row["ema_slow"]):
         return False
-    return row["adx"] > params.adx_entry_threshold
+    if not (row["adx"] > params.adx_entry_threshold):
+        return False
+    golden = bool(row["golden_cross"]) if not pd.isna(row["golden_cross"]) else False
+    pullback = bool(row["pullback_reclaim"]) if "pullback_reclaim" in row.index and not pd.isna(row["pullback_reclaim"]) else False
+    return golden or pullback
 
 
 def exit_signal(
@@ -143,11 +147,13 @@ def build_entry_signals(df: pd.DataFrame, params: StrategyParams) -> pd.Series:
     # golden_cross is built from boolean ops in compute_indicators (no NaN),
     # but fillna(False) keeps this robust if a NaN ever appears.
     golden = df["golden_cross"].fillna(False).astype(bool)
-    # NaN comparisons evaluate to False, so warmup rows are already excluded;
-    # `valid` makes the intent explicit and pins us to the loop's behavior.
+    if "pullback_reclaim" in df.columns:
+        pullback = df["pullback_reclaim"].fillna(False).astype(bool)
+    else:
+        pullback = False
     ema_above = df["ema_fast"] > df["ema_slow"]
     adx_ok = df["adx"] > params.adx_entry_threshold
-    signal = valid & golden & ema_above & adx_ok
+    signal = valid & ema_above & adx_ok & (golden | pullback)
     return signal.astype(int)
 
 
@@ -191,6 +197,7 @@ try:
         can_short = False
         startup_candle_count = 220  # warmup for 200 EMA
         stoploss = -0.10  # freqtrade hard floor (custom_stoploss tightens this)
+        use_custom_stoploss = True
 
         # Parameter spaces for hyperopt (P1.4 — keep narrow to avoid overfit)
         adx_entry = DecimalParameter(20.0, 35.0, default=25.0, space="buy")

@@ -63,8 +63,33 @@ class TestComputeIndicators:
     def test_adds_expected_columns(self, uptrend_with_cross_df):
         params = StrategyParams()
         out = compute_indicators(uptrend_with_cross_df, params)
-        for col in ["ema_fast", "ema_slow", "adx", "golden_cross", "death_cross"]:
+        for col in [
+            "ema_fast",
+            "ema_slow",
+            "adx",
+            "golden_cross",
+            "death_cross",
+            "pullback_reclaim",
+        ]:
             assert col in out.columns
+
+    def test_pullback_reclaim_fires_after_dip_below_fast_ema(self):
+        """Close below EMA50 then back above it must set pullback_reclaim."""
+        n = 260
+        up = np.linspace(100, 200, n)
+        close = np.concatenate([up, np.array([199.0, 185.0, 205.0])])
+        df = pd.DataFrame(
+            {
+                "open": close,
+                "high": close + 1.0,
+                "low": close - 1.0,
+                "close": close,
+                "volume": np.ones(len(close)) * 1000,
+            }
+        )
+        out = compute_indicators(df, StrategyParams())
+        assert out["pullback_reclaim"].iloc[-1] == True
+        assert out["golden_cross"].iloc[-1] == False
 
     def test_slow_ema_warmup_is_nan(self, uptrend_with_cross_df):
         params = StrategyParams()
@@ -118,9 +143,63 @@ class TestEntrySignal:
     def test_no_entry_on_nan_row(self):
         params = StrategyParams()
         nan_row = pd.Series(
-            {"close": 100, "ema_fast": np.nan, "ema_slow": np.nan, "adx": np.nan, "golden_cross": True}
+            {
+                "close": 100,
+                "ema_fast": np.nan,
+                "ema_slow": np.nan,
+                "adx": np.nan,
+                "golden_cross": True,
+                "pullback_reclaim": False,
+            }
         )
         assert entry_signal(nan_row, params) is False
+
+    def test_entry_on_pullback_reclaim_in_uptrend(self):
+        """Secondary signal (user 2026-08-13): buy EMA50 reclaim in an
+        established uptrend — does NOT require a new golden cross."""
+        params = StrategyParams()
+        row = pd.Series(
+            {
+                "close": 110.0,
+                "ema_fast": 108.0,
+                "ema_slow": 100.0,
+                "adx": 30.0,
+                "golden_cross": False,
+                "pullback_reclaim": True,
+                "death_cross": False,
+            }
+        )
+        assert entry_signal(row, params) is True
+
+    def test_no_pullback_entry_when_adx_weak(self):
+        params = StrategyParams()
+        row = pd.Series(
+            {
+                "close": 110.0,
+                "ema_fast": 108.0,
+                "ema_slow": 100.0,
+                "adx": 10.0,
+                "golden_cross": False,
+                "pullback_reclaim": True,
+                "death_cross": False,
+            }
+        )
+        assert entry_signal(row, params) is False
+
+    def test_no_pullback_entry_when_fast_below_slow(self):
+        params = StrategyParams()
+        row = pd.Series(
+            {
+                "close": 95.0,
+                "ema_fast": 90.0,
+                "ema_slow": 100.0,
+                "adx": 30.0,
+                "golden_cross": False,
+                "pullback_reclaim": True,
+                "death_cross": False,
+            }
+        )
+        assert entry_signal(row, params) is False
 
 
 class TestExitSignal:

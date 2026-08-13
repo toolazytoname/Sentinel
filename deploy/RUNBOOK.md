@@ -31,18 +31,22 @@ chmod 600 .env
 # 3. 启动
 docker compose up -d
 
-# 4. 查看状态
+# 4. 查看状态（S1=8080，S2=8081，两个 bot 都应是 running 而不是 stopped）
 docker compose ps
 docker compose logs -f freqtrade
+docker compose logs -f freqtrade-s2
+# curl -fsS http://localhost:8080/api/v1/ping
+# curl -fsS http://localhost:8081/api/v1/ping
 ```
 
 ## 3. 访问
 
-- **FreqUI（Web 界面）**：http://localhost:8080
+- **FreqUI S1**：http://localhost:8080
+- **FreqUI S2**：http://localhost:8081
   - 用户名：`sentinel`
   - 密码：`API_PASSWORD` 的值
-- **REST API**：http://localhost:8080/api/v1/
-- **日志**：`/freqtrade/user_data/logs/freqtrade.log`（容器内路径），宿主对应 `deploy/user_data/logs/`
+- **REST API**：http://localhost:8080/api/v1/ （S2 为 8081）
+- **日志**：宿主 `deploy/user_data/logs/freqtrade.log` 与 `freqtrade-s2.log`
 
 ## 4. 常用命令
 
@@ -63,10 +67,11 @@ docker compose restart freqtrade
 docker compose down -v
 rm -rf user_data/*
 
-# 重新下载历史数据（Phase 1 需要）
+# 重新下载历史数据（P1.1：15 个 USDT 现货，1d）
 docker compose run --rm freqtrade download-data \
-    --exchange okx --pairs BTC/USDT ETH/USDT \
-    --timeframes 1d 4h --days 1500
+    --exchange binance \
+    --pairs BTC/USDT ETH/USDT SOL/USDT XRP/USDT ADA/USDT DOGE/USDT AVAX/USDT DOT/USDT LINK/USDT BCH/USDT LTC/USDT UNI/USDT ATOM/USDT FIL/USDT NEAR/USDT \
+    --timeframes 1d 4h --days 2200
 ```
 
 ## 5. 明早起床后：激活 Telegram
@@ -193,8 +198,8 @@ sudo ufw allow from 127.0.0.1 to any port 8080 proto tcp
 sudo ufw allow from A.B.C.D to any port 8080 proto tcp
 
 # 其余入站到 8000/8080 一律拒绝（默认 deny incoming 已覆盖，此处显式声明更直观）
-sudo ufw deny 8000/tcp
-sudo ufw deny 8080/tcp
+sudo ufw allow from 127.0.0.1 to any port 8081 proto tcp
+sudo ufw deny 8081/tcp
 
 sudo ufw enable
 sudo ufw status verbose
