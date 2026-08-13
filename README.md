@@ -28,7 +28,7 @@ Sentinel 是一个面向**稳健型个人投资者**的加密货币量化交易�
 
 ## 当前状态
 
-🚧 **Phase 0 / 1 / 2 已落地（268 passed, 2 skipped），Phase 3 看板 / Phase 4 实盘未开始。**
+🚧 **Phase 0 / 1 / 2 工程已落地。2026-08-13：S1 不再只靠金叉（15 币 + 回踩），S2 已部署配置；研究回测见 `docs/system/08-s1-s2-backtest.md`。S2 最大回撤 -91%，只许 dry-run。Phase 3 看板 / Phase 4 实盘未开始。**
 
 按 `docs/system/03-tasks.md` 的 Phase 0-4 推进：
 

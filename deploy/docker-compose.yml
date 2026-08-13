@@ -29,6 +29,10 @@ services:
       HTTPS_PROXY: "${HTTPS_PROXY:-}"
       http_proxy: "${HTTP_PROXY:-}"
       https_proxy: "${HTTPS_PROXY:-}"
+      FREQTRADE_CONFIG_IN: /freqtrade/user_data/config/dry-run.json
+      FREQTRADE_STRATEGY: S1TrendFollow
+      FREQTRADE_DB_URL: sqlite:///user_data/tradesv3.sqlite
+      FREQTRADE_LOGFILE: /freqtrade/user_data/logs/freqtrade.log
     # 用 host 网络模式：让容器共享宿主机网络栈，能直接访问 127.0.0.1:7890 上的本地代理
     # 这是国内环境下让容器内 Python 访问交易所最可靠的方式
     # （之前用 bridge 模式 + host.docker.internal 在 OrbStack 下不可达）
@@ -42,6 +46,33 @@ services:
     entrypoint: ["/bin/sh", "/freqtrade/start.sh"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  freqtrade-s2:
+    image: freqtradeorg/freqtrade:stable
+    container_name: sentinel-freqtrade-s2
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      http_proxy: "${HTTP_PROXY:-}"
+      https_proxy: "${HTTPS_PROXY:-}"
+      FREQTRADE_CONFIG_IN: /freqtrade/user_data/config/dry-run-s2.json
+      FREQTRADE_STRATEGY: S2MomentumRotation
+      FREQTRADE_DB_URL: sqlite:///user_data/tradesv3-s2.sqlite
+      FREQTRADE_LOGFILE: /freqtrade/user_data/logs/freqtrade-s2.log
+    network_mode: host
+    volumes:
+      - ./user_data:/freqtrade/user_data
+      - ./start.sh:/freqtrade/start.sh:ro
+    entrypoint: ["/bin/sh", "/freqtrade/start.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/v1/ping"]
       interval: 30s
       timeout: 10s
       retries: 3

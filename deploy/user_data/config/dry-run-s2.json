@@ -1,0 +1,127 @@
+{
+    "$schema": "https://www.freqtrade.io/en/stable/schema.json",
+    "_comment": "S2 dry-run. 独立容器/端口/SQLite。与 S1 共用 whitelist 与铁律风控。",
+    "_sentinel_phase": "P1.6 — S2 dry-run, initial_state running",
+
+    "max_open_trades": 3,
+    "stake_currency": "USDT",
+    "stake_amount": 50,
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "timeframe": "1d",
+    "dry_run": true,
+    "initial_state": "running",
+    "cancel_open_orders_on_exit": false,
+
+    "exchange": {
+        "name": "binance",
+        "key": "",
+        "secret": "",
+        "pair_whitelist": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "SOL/USDT",
+            "XRP/USDT",
+            "ADA/USDT",
+            "DOGE/USDT",
+            "AVAX/USDT",
+            "DOT/USDT",
+            "LINK/USDT",
+            "BCH/USDT",
+            "LTC/USDT",
+            "UNI/USDT",
+            "ATOM/USDT",
+            "FIL/USDT",
+            "NEAR/USDT"
+        ],
+        "pair_blacklist": ["BNB/.*", ".*UP/.*", ".*DOWN/.*"],
+        "enable_ws": false,
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "timeout": 30000,
+            "aiohttp_trust_env": true,
+            "options": {
+                "defaultType": "spot",
+                "fetchMarkets": ["spot"]
+            }
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "timeout": 30000,
+            "httpsProxy": "http://127.0.0.1:7890",
+            "options": {
+                "defaultType": "spot",
+                "fetchMarkets": ["spot"]
+            }
+        }
+    },
+
+    "strategy": "S2MomentumRotation",
+
+    "stoploss": -0.10,
+    "stoploss_on_exchange": true,
+    "stoploss_on_exchange_interval": 60,
+    "stoploss_on_exchange_market_ratio": -0.01,
+
+    "entry_pricing": {"price_side": "same", "use_order_book": false},
+    "exit_pricing": {"price_side": "same", "use_order_book": false},
+
+    "pairlists": [
+        {"method": "StaticPairList"}
+    ],
+
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": "",
+        "notification_settings": {
+            "status": "on", "warning": "on", "startup": "on",
+            "entry": "on", "entry_fill": "on", "entry_cancel": "on",
+            "exit": "on", "exit_fill": "on", "exit_cancel": "on",
+            "protection_trigger": "on", "protection_trigger_global": "on"
+        }
+    },
+
+    "webhook": {
+        "enabled": true,
+        "url": "${AI_SERVICE_WEBHOOK_URL}",
+        "format": "json",
+        "retries": 2,
+        "retry_delay": 5,
+        "timeout": 10,
+        "exit_fill": {
+            "trade_id": "{trade_id}",
+            "strategy": "S2MomentumRotation",
+            "pair": "{pair}",
+            "direction": "{direction}",
+            "open_rate": "{open_rate}",
+            "close_rate": "{close_rate}",
+            "profit_ratio": "{profit_ratio}",
+            "profit_amount": "{profit_amount}",
+            "open_date": "{open_date}",
+            "close_date": "{close_date}",
+            "exit_reason": "{exit_reason}",
+            "enter_tag": "{enter_tag}",
+            "stake_amount": "{stake_amount}",
+            "stake_currency": "{stake_currency}",
+            "is_final_exit": "{is_final_exit}",
+            "sub_trade": "{sub_trade}",
+            "side": "long"
+        }
+    },
+
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8081,
+        "verbosity": "info",
+        "jwt_secret_key": "${API_JWT_SECRET}",
+        "CORS_origins": ["http://localhost:8081"],
+        "username": "sentinel",
+        "password": "${API_PASSWORD}"
+    },
+
+    "db_url": "sqlite:///user_data/tradesv3-s2.sqlite",
+    "verbosity": 3,
+    "logfile": "user_data/logs/freqtrade-s2.log"
+}

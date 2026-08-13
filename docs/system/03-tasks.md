@@ -6,7 +6,31 @@
 
 ---
 
-## ⚠️ 现状对账（2026-07-15，强模型全局复核）
+## ⚠️ 现状对账（2026-08-13，用户拍板落地）
+
+> 用户拍板：S1 不认沉默；要部署+回测 S2；dry-run 开机即跑。细节与数字见 `08-s1-s2-backtest.md`。
+
+**策略层不再空转，但「有交易」≠「能上真钱」。**
+- S1：15 币 + 回踩 EMA50 次级进场。Yahoo 日线研究回测 2020-06→2026-08：**161** 笔（其中 2024+ 进场 77 笔）。胜率 27%、平均盈亏 **-3.1%**。沉默治好了，期望值变差了。
+- S2：已部署独立容器配置 + pandas 官方回测（含 2022）：487 笔，总收益 +20.5% / **最大回撤 -91.6%**。对「回撤 <20%」不合格。只许 dry-run。
+- dry-run：`initial_state: running`；S1 端口 8080、S2 端口 8081。本云端 VM 无 Docker、币安 API 451，容器需用户在 VPS 上 `docker compose up -d`。
+
+**各任务真实状态**（详见下方各条的「📍现状」行）：
+| 任务 | 状态 | 真相 |
+|---|---|---|
+| P0.1–P0.4 | ✅ | 骨架/compose/config 模板/notifier 均在 |
+| P1.1 | 🔶 | 15 币白名单已写入配置与 `strategies/universe.py`。研究数据走 Yahoo。VPS 上仍需 `freqtrade download-data`（币安） |
+| P1.2 | 🔶 | 回踩次级信号 + 单测齐；研究回测含 2022。`lookahead-analysis` 仍未在 freqtrade 实跑 |
+| P1.3 | 🔶 | S2 已部署（`S2MomentumRotation.py` + `freqtrade-s2` 容器配置）+ 含 2022 的 pandas 回测。**回撤不合格**；freqtrade backtesting 不是 S2 官方结果 |
+| P1.4 | 🔶 | 旧 hyperopt 仍是金叉-only / BTC+ETH。新信号后**未**重跑 freqtrade hyperopt |
+| P1.5 | ⬜ | jesse 交叉验证从未做 |
+| P1.6 | 🔶 | 配置已是 running + 双策略。观察期从用户 VPS 拉起容器那天起算 |
+| P1.7 | ✅ | StrategyBase + 超时降级测试在 |
+| P2.1–P2.6 | ✅ | AI 服务全套落地且测试覆盖 |
+
+---
+
+## ⚠️ 现状对账（2026-07-15，强模型全局复核，归档）
 
 > **接棒者必读——不要再盲取「第一个 `[ ]`」。** 下面是对 P0/P1/P2 真实落地情况的诚实校准（代码在但 DoD 未必全达成）。
 > 便宜模型的机械任务（Phase R + R2）**已全部清零**（274 passed, 2 skipped, 覆盖率 91.7%）。剩下的都是需你做投资判断 + 强模型执行的活。
@@ -60,22 +84,26 @@
 
 - [ ] 🔶 **P1.1** 下载历史数据：BTC/ETH/市值前15现货，1d+4h，2020 至今
   DoD: `freqtrade download-data` 完成，数据完整性抽查无缺口
-  📍现状: 🔶 **部分**。只下了 BTC/ETH 的 1d+4h（2020-06→2026-06，约 2200 根）。**市值前 15 未下**——这直接导致 P1.4 hyperopt 样本过小。加 pairs 是提高 S1 信号密度的前置项。
+  📍现状: 🔶 **白名单已扩到 15**（`strategies/universe.py` + dry-run/hyperopt/template）。研究回测用 Yahoo 日线 2020-06→2026-08 下全。VPS 上仍需对币安跑 `freqtrade download-data`（本云端 451 连不上币安）。
+  ✅ 部分完成于 2026-08-13，commit 见该日 PR，备注 用户拍板加 pairs；数据源 Yahoo 研究 / 币安实盘下载待 VPS
 - [ ] 🔶 **P1.2** 🧠 实现 S1 趋势跟踪策略（见 02-design.md §3）
   DoD: 回测 2021-2025 跑通；**必须包含 2022 熊市**；lookahead-analysis 通过；指标计算函数有单测
-  📍现状: 🔶 **部分**。策略实现 + 单测齐，回测含 2022。但：① 3.5 年仅 3 笔交易（信号太稀，见头号根因风险）；② `freqtrade lookahead-analysis` **本机未跑**（RC.3 已标：向量化等价性证明了，但上线前仍需手动跑一次）。
+  📍现状: 🔶 **部分**。金叉仍在；新增「上升趋势中回踩 EMA50 收回」次级进场（用户不认沉默）。单测 + 向量化等价仍绿。Yahoo 研究回测 161 笔、2024+ 77 笔，但平均盈亏为负。`freqtrade lookahead-analysis` 仍未实跑。
+  ✅ 部分完成于 2026-08-13，备注 次级信号落地；未宣称 DoD 全满（lookahead / 留出段年化为正未做）
 - [ ] 🔶 **P1.3** 🧠 实现 S2 动量轮动策略
   DoD: 同上
-  📍现状: 🔶 **只编码未部署**。`strategies/s2_momentum_rotation/` 有实现+单测，但 `deploy/user_data/strategies/` 里**没有 S2 文件**，也无 S2 的 backtest/hyperopt 产物。S2 从未在真实数据上验证过。**部署+回测 S2 是让 dry-run「有交易可观察」最快的路。**
+  📍现状: 🔶 **已部署 + 已回测，回撤不合格**。`deploy/user_data/strategies/S2MomentumRotation.py` + compose `freqtrade-s2`（8081）。官方历史回测是 pandas walker（含 2022）：487 笔、+20.5%、**MaxDD -91.6%**。只许 dry-run。
+  ✅ 部分完成于 2026-08-13，备注 部署与回测完成；DoD「可进实盘」未达成（回撤远超目标）
 - [ ] 🔶 **P1.4** 超参优化 + walk-forward：hyperopt 只在 2020-2023 训练段跑，2024-2026 作为留出段验证
   DoD: 留出段年化为正且回撤 <25%；训练段和留出段表现差距有书面解释
-  📍现状: 🔶 **DoD 未达成**。hyperopt 跑了（`05-hyperopt-results.md`），但**留出段 0 交易 → 年化 0，不是「为正」**。报告诚实解释了原因（牛市无新金叉），但这恰恰说明 S1 单币种样本不足以支撑 walk-forward。**需先做 P1.1（加 pairs）或改 S1，再重跑。**
+  📍现状: 🔶 **仍未达标**。旧报告 `05-hyperopt-results.md` 是金叉-only / BTC+ETH。新信号后未重跑 freqtrade hyperopt。见 `08-s1-s2-backtest.md`。
 - [ ] **P1.5** 🧠 jesse 交叉验证：把 S1/S2 逻辑在 jesse 复现，跑 Monte Carlo
   DoD: research/ 下有 notebook 记录结果；若两框架回测结论矛盾，停下来报告用户
   📍现状: ⬜ **从未做**。无 `research/` 目录。上实盘前的一道闸，属 🧠。
 - [ ] 🔶 **P1.6** S1、S2 进入 dry-run 阶段，登记 strategy_stages（此时可先用一个 markdown 文件人工记录，AI 服务还没建）
   DoD: 两策略 dry-run 容器 7x24 运行，Telegram 心跳正常
-  📍现状: 🔶 **空转**。`sentinel-freqtrade` up 9 天，但 ① 处 STOPPED 态（`dry-run.json` 缺 `initial_state`，需设 `running` 或 Telegram `/start`）；② 只挂了 S1，无 S2 容器；③ 0 交易。观察期实为空。
+  📍现状: 🔶 **配置已就绪，观察期未开始**。S1/S2 均 `initial_state: running`；双容器 compose。需用户在 VPS `docker compose up -d` 后起算 7×24。本云端 VM 无 Docker。
+  ✅ 配置完成于 2026-08-13，备注 开机即跑已写入 json；容器由用户在自己的机器拉起
 - [x] **P1.7** 编写 `StrategyBase` 基类（confirm_trade_entry 查否决表的骨架，AI 服务未上线前默认 PASS）
   DoD: 单测覆盖超时降级路径（AI 服务不可达 → 放行 + 告警日志）
   📍现状: ✅ 完成。双副本 + 漂移守卫测试（RC.1）；fail-open 降级路径有测试。

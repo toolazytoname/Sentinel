@@ -6,9 +6,10 @@ lives in `base.py` (same directory).
 
 Logic
 -----
-Long-only. Enter when:
+Long-only. Enter when ADX > 25 AND fast EMA > slow EMA AND either:
   1. Fast EMA (50) crosses above Slow EMA (200) — golden cross
-  2. ADX > 25 (trend strength confirmed, filters chop)
+  2. Close reclaims fast EMA after dipping below it — pullback in an
+     established uptrend (2024–2026 silence fix)
 
 Exit (priority order):
   1. Hard stop: price ≤ entry × (1 - 0.08) → -8%
@@ -96,6 +97,7 @@ class S1TrendFollow(StrategyBase):
     stoploss = -0.10  # freqtrade hard floor (exchange stoploss); custom_stoploss tightens
     stoploss_on_exchange = True
     trailing_stop = False  # handled by custom_stoploss below
+    use_custom_stoploss = True
 
     use_exit_signal = True
     exit_profit_only = False
@@ -111,6 +113,32 @@ class S1TrendFollow(StrategyBase):
     }
     order_time_in_force = {"entry": "GTC", "exit": "GTC"}
 
+    @property
+    def protections(self):
+        """Engine-level circuit breakers (design §2.1 三件套).
+
+        freqtrade 2026.6 dropped top-level config protections; they live here.
+        """
+        return [
+            {
+                "method": "MaxDrawdown",
+                "lookback_period": 1440,
+                "stop_duration": 1440,
+                "trade_limit": 1,
+                "max_allowed_drawdown": 0.10,
+            },
+            {
+                "method": "StoplossGuard",
+                "lookback_period": 240,
+                "stop_duration": 720,
+                "trade_limit": 3,
+            },
+            {
+                "method": "CooldownPeriod",
+                "stop_duration_candles": 2,
+            },
+        ]
+
     # ── Indicators ────────────────────────────────────────────────────────
 
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -121,6 +149,10 @@ class S1TrendFollow(StrategyBase):
         fast, slow = dataframe["ema_fast"], dataframe["ema_slow"]
         dataframe["golden_cross"] = (fast > slow) & (fast.shift(1) <= slow.shift(1))
         dataframe["death_cross"] = (fast < slow) & (fast.shift(1) >= slow.shift(1))
+        dataframe["pullback_reclaim"] = (
+            (dataframe["close"].shift(1) < fast.shift(1))
+            & (dataframe["close"] >= fast)
+        )
         return dataframe
 
     # ── Entry ─────────────────────────────────────────────────────────────
@@ -128,10 +160,13 @@ class S1TrendFollow(StrategyBase):
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
         threshold = float(self.adx_entry.value)
         dataframe["enter_long"] = (
-            dataframe["golden_cross"]
-            & (dataframe["ema_fast"] > dataframe["ema_slow"])
+            (dataframe["ema_fast"] > dataframe["ema_slow"])
             & (dataframe["adx"] > threshold)
             & dataframe["adx"].notna()
+            & (
+                dataframe["golden_cross"]
+                | dataframe["pullback_reclaim"].fillna(False)
+            )
         ).astype(int)
         return dataframe
 

@@ -131,32 +131,149 @@ def rotation_plan(
     return equal_weights(top_k, total_stake, params)
 
 
+def is_rebalance_timestamp(ts) -> bool:
+    """Weekly rebalance = Monday UTC. Naive timestamps treated as UTC."""
+    t = pd.Timestamp(ts)
+    if t.tzinfo is not None:
+        t = t.tz_convert("UTC").tz_localize(None)
+    return int(t.dayofweek) == 0
+
+
+def snapshot_momentum_and_volume(
+    df: pd.DataFrame,
+    lookback: int,
+) -> tuple[float, float] | None:
+    """Point-in-time momentum + volume using only rows already in ``df``."""
+    if df is None or len(df) < lookback + 1:
+        return None
+    close = df["close"]
+    last = float(close.iloc[-1])
+    past = float(close.iloc[-1 - lookback])
+    if past == 0:
+        return None
+    mom = last / past - 1.0
+    vol = float(df["volume"].iloc[-lookback:].sum()) if "volume" in df.columns else 0.0
+    return mom, vol
+
+
+def rank_holdings(
+    snapshots: dict[str, pd.DataFrame],
+    params: RotationParams,
+) -> list[str]:
+    """Cross-sectional top-K from a dict of as-of OHLCV frames."""
+    volumes: dict[str, float] = {}
+    momentum: dict[str, float] = {}
+    for pair, frame in snapshots.items():
+        scored = snapshot_momentum_and_volume(frame, params.momentum_lookback_days)
+        if scored is None:
+            continue
+        momentum[pair], volumes[pair] = scored
+    if not momentum:
+        return []
+    plan = rotation_plan(list(snapshots), volumes, momentum, total_stake=1.0, params=params)
+    return list(plan.keys())
+
+
 # ---- freqtrade adapter ----
 
 try:
-    from freqtrade.strategy import IntParameter, DecimalParameter
+    from freqtrade.strategy import IntParameter
 
     from strategies.base import StrategyBase
 
     class S2MomentumRotation(StrategyBase):
-        """freqtrade-compatible rotation strategy. Wires pure functions above.
+        """freqtrade adapter for live/dry-run.
 
-        Inherits confirm_trade_entry → AI veto from StrategyBase.
+        Cross-sectional rank is computed in ``bot_loop_start`` from the
+        dataprovider (current candle only). Historical freqtrade backtesting
+        of this adapter is NOT the official S2 result — use
+        ``strategies.s2_momentum_rotation.backtest.run_rotation_backtest``.
         """
+
         timeframe = "1d"
         can_short = False
-        startup_candle_count = 60  # need 30d momentum + warmup
+        startup_candle_count = 60
         stoploss = -0.10
+        use_exit_signal = True
+        use_custom_stoploss = False
+        process_only_new_candles = True
+        minimal_roi = {"0": 100}
+        stoploss_on_exchange = True
 
-        # Hyperopt ranges — narrow to prevent overfit
         universe_size = IntParameter(5, 20, default=10, space="buy")
         hold_top_k = IntParameter(2, 5, default=3, space="buy")
         momentum_lookback = IntParameter(14, 60, default=30, space="buy")
 
+        def bot_loop_start(self, current_time, **kwargs) -> None:
+            self._maybe_refresh_holdings(current_time)
+
         def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-            params = RotationParams(momentum_lookback_days=int(self.momentum_lookback.value))
-            dataframe["momentum"] = momentum_score(dataframe, params.momentum_lookback_days)
+            lookback = int(self.momentum_lookback.value)
+            dataframe["momentum"] = momentum_score(dataframe, lookback)
             return dataframe
+
+        def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+            dataframe["enter_long"] = 0
+            hold = getattr(self, "_hold_set", frozenset())
+            pair = metadata.get("pair", "")
+            if pair in hold and len(dataframe) > 0:
+                dataframe.loc[dataframe.index[-1], "enter_long"] = 1
+            return dataframe
+
+        def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+            dataframe["exit_long"] = 0
+            hold = getattr(self, "_hold_set", frozenset())
+            pair = metadata.get("pair", "")
+            if pair not in hold and len(dataframe) > 0:
+                dataframe.loc[dataframe.index[-1], "exit_long"] = 1
+            return dataframe
+
+        @property
+        def protections(self):
+            return [
+                {
+                    "method": "MaxDrawdown",
+                    "lookback_period": 1440,
+                    "stop_duration": 1440,
+                    "trade_limit": 1,
+                    "max_allowed_drawdown": 0.10,
+                },
+                {
+                    "method": "StoplossGuard",
+                    "lookback_period": 240,
+                    "stop_duration": 720,
+                    "trade_limit": 3,
+                },
+                {
+                    "method": "CooldownPeriod",
+                    "stop_duration_candles": 2,
+                },
+            ]
+
+        def _rotation_params(self) -> RotationParams:
+            return RotationParams(
+                universe_size=int(self.universe_size.value),
+                hold_top_k=int(self.hold_top_k.value),
+                momentum_lookback_days=int(self.momentum_lookback.value),
+            )
+
+        def _maybe_refresh_holdings(self, current_time) -> None:
+            first = getattr(self, "_hold_set", None) is None
+            if not first and not is_rebalance_timestamp(current_time):
+                return
+            self._hold_set = frozenset(self._rank_from_dataprovider())
+
+        def _rank_from_dataprovider(self) -> list[str]:
+            dp = getattr(self, "dp", None)
+            if dp is None:
+                return []
+            snapshots: dict[str, pd.DataFrame] = {}
+            for pair in dp.current_whitelist():
+                frame, _ = dp.get_analyzed_dataframe(pair, self.timeframe)
+                if frame is None or frame.empty:
+                    continue
+                snapshots[pair] = frame
+            return rank_holdings(snapshots, self._rotation_params())
 
 except ImportError:
     S2MomentumRotation = None  # type: ignore[assignment]
