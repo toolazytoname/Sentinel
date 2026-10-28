@@ -87,6 +87,12 @@ class _PureStrategyBase:
         reimplement — they inherit this and get the ADR-002 fail-open
         guarantee for free.
         """
+        runmode = getattr(self, "config", {}).get("runmode")
+        if getattr(runmode, "value", runmode) in {
+            "backtest", "hyperopt", "util_exchange", "util_no_exchange",
+        }:
+            # Historical research, including lookahead utilities, excludes today's AI/news.
+            return True
         return check_veto(
             strategy=self.__class__.__name__,
             pair=pair,
@@ -120,6 +126,10 @@ try:
         # We rely on signal exits, not ROI tables; subclasses may override.
         minimal_roi = {"0": 100}
         use_exit_signal = True
+
+        # IStrategy supplies a default PASS callback before the mixin in the
+        # MRO. Bind Sentinel's canonical callback explicitly so VETO is honored.
+        confirm_trade_entry = _PureStrategyBase.confirm_trade_entry
 
 except ImportError:
     # freqtrade not installed (e.g. CI venv) — tests run against _PureStrategyBase.

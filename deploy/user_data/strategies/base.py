@@ -85,6 +85,12 @@ class StrategyBase(IStrategy):
         **kwargs,
     ) -> bool:
         """Delegate to check_veto. Subclasses MUST NOT override this."""
+        runmode = getattr(self, "config", {}).get("runmode")
+        if getattr(runmode, "value", runmode) in {
+            "backtest", "hyperopt", "util_exchange", "util_no_exchange",
+        }:
+            # Historical research, including lookahead utilities, excludes today's AI/news.
+            return True
         return check_veto(
             strategy=self.__class__.__name__,
             pair=pair,

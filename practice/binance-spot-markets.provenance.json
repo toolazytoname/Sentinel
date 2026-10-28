@@ -1,0 +1,11 @@
+{
+  "source": "Binance official public market metadata API",
+  "source_url": "https://data-api.binance.vision/api/v3/exchangeInfo?symbols=%5B%22BTCUSDT%22%2C%22ETHUSDT%22%5D",
+  "fetched_on": "2026-10-28",
+  "sha256": "65e8db10d5baf3ec97442f0489b93593089f9de181283abccba033e627b769fa",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "scope": "Public current trading limits and market metadata only; no prices, fills, keys or wallet data. These current limits are not historical limits. Freqtrade computes every simulated trade from local OHLCV."
+}

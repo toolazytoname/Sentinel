@@ -8,21 +8,22 @@ Long-only. Enter when:
 
 Exit (in priority order):
   1. custom_stoploss below -8% from entry → hard stop
-  2. Trailing stop: 5% from peak since entry → locks in profit
+  2. After price first rises above entry: trail 5% from observed peak
   3. EMA cross back below (50 < 200) → trend reversal exit
   4. ADX drops below 18 → trend weakness exit
 
 Designed for the freqtrade IStrategy interface. Tested via direct unit tests
 on the underlying signal logic without requiring freqtrade runtime.
 """
-from __future__ import annotations
-
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 
 import pandas as pd
 
 from strategies.indicators import adx, ema
+
+STATIC_STOPLOSS = -0.10
 
 
 # ---- Signal definitions (pure logic, no freqtrade dependency) ----
@@ -42,6 +43,25 @@ class StrategyParams:
     adx_exit_threshold: float = 18.0
     hard_stop_pct: float = 0.08  # -8% from entry triggers exit
     trailing_stop_pct: float = 0.05  # 5% from peak
+
+
+def long_stop_price(
+    entry_price: float,
+    peak_since_entry: float,
+    hard_stop_pct: float,
+    trailing_stop_pct: float,
+) -> float:
+    """Absolute long stop; trailing activates once observed price exceeds entry.
+
+    The fixed stop stays anchored to entry and cannot relax the engine's
+    -10% floor. The peak is observed trade data, never a future candle.
+    These are price distances, before fees; a trailing stop need not lock
+    in a positive net return when the peak is only slightly above entry.
+    """
+    fixed = entry_price * (1 - min(hard_stop_pct, abs(STATIC_STOPLOSS)))
+    if peak_since_entry > entry_price:
+        return max(fixed, peak_since_entry * (1 - trailing_stop_pct))
+    return fixed
 
 
 def compute_indicators(
@@ -103,11 +123,14 @@ def exit_signal(
     current = row["close"]
 
     # 1. Hard stop — protects against catastrophic loss
-    if current <= entry_price * (1 - params.hard_stop_pct):
+    hard = min(params.hard_stop_pct, abs(STATIC_STOPLOSS))
+    if current <= entry_price * (1 - hard):
         return True, "hard_stop"
 
     # 2. Trailing stop — protects unrealized gains
-    if current <= peak_since_entry * (1 - params.trailing_stop_pct):
+    if current <= long_stop_price(
+        entry_price, peak_since_entry, params.hard_stop_pct, params.trailing_stop_pct,
+    ):
         return True, "trailing_stop"
 
     # 3. Death cross — only check if indicator is valid
@@ -176,7 +199,7 @@ def build_exit_signals(df: pd.DataFrame, params: StrategyParams) -> pd.Series:
 # ---- freqtrade adapter (only loads when freqtrade IStrategy is available) ----
 
 try:
-    from freqtrade.strategy import DecimalParameter
+    from freqtrade.strategy import DecimalParameter, Trade, stoploss_from_absolute
 
     from strategies.base import StrategyBase
 
@@ -190,7 +213,9 @@ try:
         timeframe = "1d"
         can_short = False
         startup_candle_count = 220  # warmup for 200 EMA
-        stoploss = -0.10  # freqtrade hard floor (custom_stoploss tightens this)
+        stoploss = STATIC_STOPLOSS  # engine hard floor; custom stop only tightens
+        use_custom_stoploss = True
+        trailing_stop = False  # exclusively handled by custom_stoploss
 
         # Parameter spaces for hyperopt (P1.4 — keep narrow to avoid overfit)
         adx_entry = DecimalParameter(20.0, 35.0, default=25.0, space="buy")
@@ -227,6 +252,8 @@ try:
             # Delegates to the vectorized builder (equivalence-tested vs entry_signal).
             params = StrategyParams(adx_entry_threshold=float(self.adx_entry.value))
             dataframe["enter_long"] = build_entry_signals(dataframe, params)
+            dataframe["enter_tag"] = ""
+            dataframe.loc[dataframe["enter_long"] == 1, "enter_tag"] = "s1_trend_entry"
             return dataframe
 
         def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
@@ -238,20 +265,31 @@ try:
                 trailing_stop_pct=float(self.trailing_stop_pct.value),
             )
             dataframe["exit_long"] = build_exit_signals(dataframe, params)
+            dataframe["exit_tag"] = ""
+            exiting = dataframe["exit_long"] == 1
+            dataframe.loc[exiting, "exit_tag"] = "s1_adx_weak"
+            dataframe.loc[
+                exiting & dataframe.get("death_cross", False), "exit_tag"
+            ] = "s1_death_cross"
             return dataframe
 
-        def custom_stoploss(self, *args, **kwargs) -> float:
-            """Tighten stop as trade moves in our favour.
+        def custom_stoploss(
+            self, pair: str, trade: Trade, current_time: datetime,
+            current_rate: float, current_profit: float, after_fill: bool = False, **kwargs,
+        ) -> float | None:
+            """Convert the entry/peak anchored price into Freqtrade's distance.
 
-            In profit → trail by trailing_stop_pct. Always at least hard_stop.
+            Freqtrade persists the raised stop and never lowers it. Returning
+            None when already crossed preserves that stop for engine execution.
+            current_profit includes fees, so activation uses observed prices.
             """
-            hard = -float(self.hard_stop.value)
-            # freqtrade passes current_profit as kwarg
-            current_profit = kwargs.get("current_profit")
-            if current_profit is not None and current_profit > 0:
-                trail = -float(self.trailing_stop_pct.value)
-                return max(hard, trail)
-            return hard
+            peak = max(trade.max_rate or trade.open_rate, current_rate)
+            target = long_stop_price(
+                trade.open_rate, peak, float(self.hard_stop.value),
+                float(self.trailing_stop_pct.value),
+            )
+            target = max(target, trade.stop_loss or 0.0)
+            return stoploss_from_absolute(target, current_rate, leverage=trade.leverage) or None
 
 except ImportError:
     # freqtrade not installed locally — pure-logic functions still usable for testing

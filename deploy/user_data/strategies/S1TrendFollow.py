@@ -12,7 +12,7 @@ Long-only. Enter when:
 
 Exit (priority order):
   1. Hard stop: price ≤ entry × (1 - 0.08) → -8%
-  2. Trailing stop: price ≤ peak × (1 - 0.05) → 5% from peak
+  2. Once observed price exceeds entry: price ≤ peak × (1 - 0.05)
   3. Death cross: fast EMA drops back below slow EMA
   4. ADX collapse: ADX < 18
 
@@ -23,10 +23,11 @@ Veto (confirm_trade_entry):
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from freqtrade.strategy import DecimalParameter
+from freqtrade.strategy import DecimalParameter, Trade, stoploss_from_absolute
 
 from base import StrategyBase
 
@@ -40,6 +41,26 @@ ADX_ENTRY = 25.0
 ADX_EXIT = 18.0
 HARD_STOP_PCT = 0.08
 TRAILING_STOP_PCT = 0.05
+STATIC_STOPLOSS = -0.10
+
+
+def long_stop_price(
+    entry_price: float,
+    peak_since_entry: float,
+    hard_stop_pct: float,
+    trailing_stop_pct: float,
+) -> float:
+    """Absolute long stop; trailing activates once observed price exceeds entry.
+
+    The fixed stop stays anchored to entry and cannot relax the engine's
+    -10% floor. The peak is observed trade data, never a future candle.
+    These are price distances, before fees; a trailing stop need not lock
+    in a positive net return when the peak is only slightly above entry.
+    """
+    fixed = entry_price * (1 - min(hard_stop_pct, abs(STATIC_STOPLOSS)))
+    if peak_since_entry > entry_price:
+        return max(fixed, peak_since_entry * (1 - trailing_stop_pct))
+    return fixed
 
 
 # ── Pure indicator helpers ─────────────────────────────────────────────────
@@ -93,7 +114,8 @@ class S1TrendFollow(StrategyBase):
     hard_stop = DecimalParameter(0.05, 0.15, default=HARD_STOP_PCT, space="sell")
     trailing_stop_p = DecimalParameter(0.03, 0.10, default=TRAILING_STOP_PCT, space="sell")
 
-    stoploss = -0.10  # freqtrade hard floor (exchange stoploss); custom_stoploss tightens
+    stoploss = STATIC_STOPLOSS  # engine hard floor; custom stop only tightens
+    use_custom_stoploss = True
     stoploss_on_exchange = True
     trailing_stop = False  # handled by custom_stoploss below
 
@@ -153,6 +175,8 @@ class S1TrendFollow(StrategyBase):
             & (dataframe["adx"] > threshold)
             & dataframe["adx"].notna()
         ).astype(int)
+        dataframe["enter_tag"] = ""
+        dataframe.loc[dataframe["enter_long"] == 1, "enter_tag"] = "s1_trend_entry"
         return dataframe
 
     # ── Exit ──────────────────────────────────────────────────────────────
@@ -163,19 +187,26 @@ class S1TrendFollow(StrategyBase):
         dataframe["exit_long"] = (
             dataframe["death_cross"] | (dataframe["adx"] < adx_threshold)
         ).astype(int)
+        dataframe["exit_tag"] = ""
+        exiting = dataframe["exit_long"] == 1
+        dataframe.loc[exiting, "exit_tag"] = "s1_adx_weak"
+        dataframe.loc[exiting & dataframe["death_cross"], "exit_tag"] = "s1_death_cross"
         return dataframe
 
-    def custom_stoploss(self, *args, **kwargs) -> float:
-        """Tighten stop as trade moves in our favour.
+    def custom_stoploss(
+        self, pair: str, trade: Trade, current_time: datetime,
+        current_rate: float, current_profit: float, after_fill: bool = False, **kwargs,
+    ) -> float | None:
+        """Convert the entry/peak anchored price into Freqtrade's distance.
 
-        Returns the stoploss as a fraction of current_rate (negative = stop
-        below current price). freqtrade will use the most conservative
-        (tightest) of this and the static stoploss.
+        Freqtrade persists the raised stop and never lowers it. Returning
+        None when already crossed preserves that stop for engine execution.
+        current_profit includes fees, so activation uses observed prices.
         """
-        hard = -float(self.hard_stop.value)
-        current_profit = kwargs.get("current_profit")
-        if current_profit is not None and current_profit > 0:
-            # Once in profit, trail at trailing_stop_p from current_rate
-            trail = -float(self.trailing_stop_p.value)
-            return max(hard, trail)
-        return hard
+        peak = max(trade.max_rate or trade.open_rate, current_rate)
+        target = long_stop_price(
+            trade.open_rate, peak, float(self.hard_stop.value),
+            float(self.trailing_stop_p.value),
+        )
+        target = max(target, trade.stop_loss or 0.0)
+        return stoploss_from_absolute(target, current_rate, leverage=trade.leverage) or None

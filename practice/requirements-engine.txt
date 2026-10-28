@@ -1,0 +1,4 @@
+# Isolated historical replay runtime. Requires Python 3.12.
+freqtrade==2026.6
+# Freqtrade imports scipy.stats during ordinary backtesting as well.
+scipy
