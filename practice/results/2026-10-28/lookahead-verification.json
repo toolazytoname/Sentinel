@@ -1,0 +1,34 @@
+{
+  "status": "pass",
+  "exit_code": 0,
+  "minimum_trade_amount": 20,
+  "targeted_trade_amount": 30,
+  "actual_sampled": 30,
+  "has_bias": false,
+  "biased_entry_signals": 0,
+  "biased_exit_signals": 0,
+  "biased_indicators": [],
+  "network_test": "HTTP_PROXY,HTTPS_PROXY,ALL_PROXY and lowercase variants intentionally point to refused localhost:9; only local metadata endpoint bypassed",
+  "framework_in_memory_overrides": {
+    "enable_protections": false,
+    "max_open_trades": -1,
+    "dry_run_wallet": 1000000000,
+    "stake_amount": 10000,
+    "backtest_cache": "none"
+  },
+  "preserved_order_types": "limit entry/exit; stoploss_on_exchange true",
+  "cli_workaround": "Freqtrade 2026.6 parses --allow-limit-orders but fails to propagate it to config; identical lookahead_allow_limit_orders:true set explicitly in isolated diagnostic config",
+  "limitation": "No detected future signal/indicatorleak in30checkedcases; notprofitabilityproof. Officialframework in-memorydiagnostic capital/protection overrides do not modify replay/production files.",
+  "CSV": {
+    "filename": "S1TrendFollow.py",
+    "strategy": "S1TrendFollow",
+    "has_bias": "False",
+    "total_signals": "30",
+    "biased_entry_signals": "0",
+    "biased_exit_signals": "0",
+    "biased_indicators": ""
+  },
+  "AI_HTTP_warnings": 0,
+  "previous_AI_HTTP_warnings": 537,
+  "actual_diagnostic_mode": "util_no_exchange"
+}

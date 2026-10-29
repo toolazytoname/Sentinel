@@ -1,0 +1,21 @@
+{
+  "strategy": "S1TrendFollow",
+  "start": 1609459200000,
+  "end": 1786147200000,
+  "initial": 1000.0,
+  "final": 1009.06139349,
+  "timeframe": "4h",
+  "profit": 9.06139349,
+  "profit_ratio": 0.00906139349,
+  "fee": 0.001,
+  "fees_total": 4.8990928099,
+  "trade_count": 49,
+  "forced_close_count": 0,
+  "terminal_holdings_value": 0,
+  "terminal_unrealized": 0,
+  "drawdown": 0.014738951406908672,
+  "benchmark_final": 2417.14113229085,
+  "benchmark_drawdown": 0.7912342057117945,
+  "stake_amount": 50,
+  "equity_source": "Freqtrade 钱包每根行情线开盘市值快照，补扣持仓买入费用，末点按导出结算核对"
+}

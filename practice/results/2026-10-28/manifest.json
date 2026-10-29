@@ -1,0 +1,23 @@
+{
+  "mode": "historical_backtest",
+  "engine": "2026.6",
+  "timerange": "20210101-20260808",
+  "timeframe": "4h",
+  "virtual_wallet": 1000,
+  "stake_amount": 50,
+  "fee_per_side": 0.001,
+  "current_news_veto": false,
+  "metadata_limits_date": "2026-10-28",
+  "market_metadata": "public_snapshot",
+  "metadata_sha256": "65e8db10d5baf3ec97442f0489b93593089f9de181283abccba033e627b769fa",
+  "strategy_files_sha256": {
+    "S1TrendFollow.py": "5b5ce8b4c2be693004b3aa3330a921f96c05bff829bed23002cffe3662729519",
+    "base.py": "0fde244b4cbde58573e6c614c0887323d2bc692926f6c1aeb2ea3c9bffc7bb7b"
+  },
+  "data_files_sha256": {
+    "BTC_USDT-1d.json": "ae3b689cdcbf9e608c7819a1342f5641446d05a3ff93045a17013ef7013a57f4",
+    "ETH_USDT-4h.json": "2eeda56bd12b0e22eaf661b623dcf2427948d74a3f98f84f9825700711dd9848",
+    "ETH_USDT-1d.json": "b8d1d762054483ac2563cf7e575332ae2f45711a15db936cc266f644653e6c58",
+    "BTC_USDT-4h.json": "3d2457da0921e7eb1a6b8127fc04fb23ea78454b0fd37df0baee24a6dd02906c"
+  }
+}
