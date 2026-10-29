@@ -48,15 +48,16 @@
 
 ### R4 实际结果与复现证据
 
-- [ ] **R4.4** 将已完成的代码与本次结果提交 GitHub（2026-10-28，用户明确授权）。
+- [x] **R4.4** 将已完成的代码与本次结果提交 GitHub（2026-10-28，用户明确授权）。
   DoD: 在 `practice/results/2026-10-28/` 保存可由 GitHub 直接阅读的中文摘要、独立 HTML、数字摘要、原始回测 ZIP、输入哈希与前视核对记录；不提交密钥、本地环境或无关未提交文件；普通 fast-forward 推送并核对远端提交及归档文件。
+  ✅ 完成于 2026-10-28，commit `7f550ad`。7 个归档文件（约 692 KB）与代码已普通推送到 `origin/main`，`git ls-remote` 确认远端为 `7f550ada5bf4d4d8d4afa33ac585e6024ba37bb0`。校验文件哈希、原始 ZIP 的 49 笔交易与最终余额、离线 HTML 和配置脱敏均通过；既有 README/.gitignore 修改及 tutorial/ 等未提交内容保持原样。中文摘要可在 GitHub 直接阅读，完整 HTML 下载后离线打开；重新计算仍需另备环境与行情。
 
 - 学习样本：BTC/ETH，2021-01-01 → 2026-08-08，4h，固定 S1 规则；虚拟本金 1,000 USDT，每笔 50 USDT，单边手续费 0.1%。
 - 完整回放 49 笔，末值 1,009.06139349 USDT，净收益 +9.06139349，总手续费 4.8990928099，按 4h 钱包快照采样的最大回撤 1.473895%。
 - 同期同本金各半买入持有末值 2,417.14113229 USDT，采样最大回撤 79.123421%。该基准全额投入，策略固定小额且经常空仓，不能只凭收益或回撤判定优劣。
 - 当前结果是历史学习样本，不构成盈利/实盘升级依据；既有 S1 历史报告是在止损修复前生成，不能直接沿用其收益结论。资金升级门槛不变，P1.4 投资验收仍未通过。
-- 本地（不提交行情/运行产物）：`practice/output/replay-vnfqp5n7/`、`practice/output/latest.html`、`practice/output/acceptance-lookahead-v64ongtn/`。含实际引擎 ZIP、交易日志、输入哈希、命令与前视 CSV。
-- 依赖已实际安装并冻结于 `practice/requirements-engine.lock.txt`；主项目已有 3.14 测试环境保留，练习使用独立 Python 3.12 环境。GitHub 版本落后于本地，先前基于远端的审查不代表本地最新状态。
+- 完整本地运行目录：`practice/output/replay-vnfqp5n7/`、`practice/output/latest.html`、`practice/output/acceptance-lookahead-v64ongtn/`。含实际引擎 ZIP、交易日志、输入哈希、命令与前视 CSV；`output/` 仍忽略。本次应用户要求，将最终报告和精选核对档案单独保存到 `practice/results/2026-10-28/` 并提交；行情缓存和本地环境不提交。
+- 依赖已实际安装并冻结于 `practice/requirements-engine.lock.txt`；主项目已有 3.14 测试环境保留，练习使用独立 Python 3.12 环境。R4.4 已将代码与结果同步到 GitHub；先前基于旧远端版本的审查不代表当前实现。
 
 允许改动：S1 源码/部署副本、两份策略基类与相关测试、pytest 测试发现配置；新增 practice/ 报告与执行入口、学习专用回测配置、PRACTICE.md；本任务清单。保留现有 tutorial/ 和未提交修改；不修改 ADR、资金状态机、数据库契约与现有运行钱包。
 
